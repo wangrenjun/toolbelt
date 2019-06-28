@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+
+# Monitor a service and restart if stopped
+
+readonly SCRIPT_NAME="$(basename $0)"
+readonly LOG_FILE="/var/log/${SCRIPT_NAME}.log"
+readonly SYS_INIT_DIR='/etc/init.d'
+
+usage()
+{
+    cat << EOF >&2
+USAGE: $SCRIPT_NAME [-h | --help]
+                       [-s <service name> | --service-name <service name>]
+                       [-l[<path>] | --log[=<path>]]
+                       COMMAND
+
+OPTIONS
+        -s <service name>, --service-name <service name>
+            Service name to be monitored.
+
+        -l[<path>], --log[=<path>]
+            Specify the log path. the <path> parameter is optional, if it doesn't passed then default is $LOG_FILE.
+
+EOF
+    exit
+}
+
+readonly __NORMAL="$(tput sgr0)"
+readonly __RED="$(tput setaf 1)"
+
+perror()
+{
+    printf "${__RED}${SCRIPT_NAME}: %s${__NORMAL}\n" "${*}" >&2
+}
+
+log()
+{
+    [ -z "$logf" ] && return
+    echo "$(date +'%Y-%m-%d %H:%M:%S') ${*}" >> "$logf"
+}
+
+# Check if system is using systemd or sysvinit
+systemd_or_sysvinit()
+{
+    local either=$(ps --no-headers -o comm 1 2> /dev/null)
+    echo ${either//init/sysvinit}
+
+# Other way in block comment
+: <<'END'
+    if pidof /sbin/init &> /dev/null; then
+        echo 'sysvinit'
+    elif pidof systemd &> /dev/null; then
+        echo 'systemd'
+    fi
+END
+}
+
+main()
+{
+    [ "${#}" = 0 ] && usage
+    opts="$(getopt -q -o s:l::h --long service-name:,log::,help -n $SCRIPT_NAME -- ${@})"
+    if [ "${?}" != 0 ]; then
+        perror 'Failed to parsing options'
+        usage
+    fi
+    eval set -- "$opts"
+    while true; do
+        case "${1}" in
+        -h | --help ) usage ;;
+        -s | --service-name ) service_name="${2}"; shift 2 ;;
+        -l | --log )
+            case "${2}" in
+            '' ) logf="$LOG_FILE"; shift 2 ;;
+            * )  logf="${2}"; shift 2 ;;
+            esac ;;
+        -- ) shift; break ;;
+        * ) perror 'Internal error'; usage ;;
+        esac
+    done
+    if [ "${#}" \> 0 ]; then
+        command="${*}"
+        shift "${#}"
+    fi
+    [ -z "$service_name" ] && [ -z "$command" ] && usage
+
+    if [ -n "$service_name" ]; then
+        service "$service_name" status &> /dev/null && return   # Still running
+        log "'$service_name' is stopped"
+        service "$service_name" start &> /dev/null && return    # Restart success
+        case "$(systemd_or_sysvinit)" in
+        'systemd' )
+            if [ -f "${SYS_INIT_DIR}/${service_name}" ]; then
+                log "'$service_name' restart failed"
+            else
+                log "'$service_name' is unrecognized service"
+            fi ;;
+        * )
+            if service --status-all 2>&1 | grep -Fq "$service_name"; then
+                log "'$service_name' restart failed"
+            else
+                log "'$service_name' is unrecognized service"
+            fi ;;
+        esac
+    else
+        arr=($command)
+        #program=$(basename "${arr[0]}")
+        program="${arr[0]}"
+        pid=$(ps -ef | grep "$program" |grep -v grep | grep -v "$SCRIPT_NAME" | awk '{print $2}')
+        if [ -z "$pid" ]; then
+            log "'$command' is stopped"
+            eval "$command" &> /dev/null || log "'$command' restart failed"
+        fi
+    fi
+}
+
+main "${@}"

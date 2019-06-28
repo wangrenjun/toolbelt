@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import http, http.client, sys, argparse
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import init_colored
+from extras import streamistty
+from extras import has_fuzzy_matched
+from extras import has_substr_matched
+
+WIDTH_ARGUMENTS = 20
+WIDTH_CODES = 5
+WIDTH_NAMES = 35
+WIDTH_PHRASES = 35
+WIDTH_DESCRIPTIONS = 90
+
+def parse_args():
+    parser = ColoredArgParser(description = 'List or find the http status and descriptions.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-l', '--list',
+        default = False,
+        action = 'store_true',
+        help = 'List HTTP statuses.')
+    parser.add_argument('-f', '--fuzzy',
+        action = 'store_true',
+        default = False,
+        dest = 'is_fuzzy',
+        help = 'Enable fuzzy matching.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('words',
+        nargs = '*',
+        help = 'Search for statuses contains all the given words.')
+    return parser.parse_args()
+
+def int_to_enum(n):
+    try:
+        return http.HTTPStatus(n)
+    except ValueError:
+        return None
+
+def listall():
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Code', alignment = '<', fixed_width = WIDTH_CODES)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Phrase', alignment = '<', fixed_width = WIDTH_PHRASES)
+    pt.add_field('Description', alignment = '<', fixed_width = WIDTH_DESCRIPTIONS)
+    for status_code in sorted(http.client.responses.keys()):
+        pt.add_record('', status_code.value, status_code.name, http.client.responses[status_code], status_code.description)
+    print(pt)
+
+def listfound(words, is_fuzzy):
+    if not words:
+        return
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Code', alignment = '<', fixed_width = WIDTH_CODES)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Phrase', alignment = '<', fixed_width = WIDTH_PHRASES)
+    pt.add_field('Description', alignment = '<', fixed_width = WIDTH_DESCRIPTIONS)
+    for word in words:
+        if word.isdigit():
+            status_code = int_to_enum(int(word))
+            if status_code:
+                pt.add_record(repr(word), status_code.value, status_code.name, http.client.responses[status_code], status_code.description)
+        else:
+            for k, v in http.client.responses.items():
+                haystack = (k.name, v, k.description)
+                if has_substr_matched(word, haystack, ignore_case = True)   \
+                    or (is_fuzzy and has_fuzzy_matched(word, haystack, ignore_case = True)):
+                    pt.add_record(repr(word), k.value, k.name, v, k.description)
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    if args.list:
+        listall()
+    words = args.words
+    if not args.list and not args.words and not args.infile:
+        args.infile = ( sys.stdin, )
+    for file in args.infile or ():
+        if file == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        words.extend(file.read().split())
+    listfound(words, args.is_fuzzy)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

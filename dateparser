@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import datetime, dateutil.parser, sys, argparse, dateutil.relativedelta, time, logging
+import math, itertools, abc
+from extras import xstr
+from extras import ColoredArgParser
+from extras import ttyautocolorize
+from extras import PrettyVTable
+from extras import joiniterable
+from extras import init_colored
+from extras import init_colored_logger
+from extras import streamistty
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Parse different datetime formats.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('--format',
+        choices = ['MDY', 'DMY', 'YMD', 'YDM'],
+        default = 'MDY',
+        help = 'Format when parsing datetime, the default is MDY.')
+    parser.add_argument('-c', '--compare-from',
+        default = None,
+        help = 'Specified this time to compare the time difference, the default is now.')
+    parser.add_argument('-s', '--iso',
+        default = False,
+        action = 'store_true',
+        help = 'Format the datetime using ISO 8601.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('datetime',
+        nargs = '*',
+        help = 'Datetimes.')
+    return parser.parse_args()
+
+def tryparse(date, **kwargs):
+    parsed_datetime = None
+    try:
+        parsed_datetime = datetime.datetime.fromtimestamp(float(date))
+    except:
+        pass
+    if not parsed_datetime:
+        try:
+            try:
+                parsed_datetime = dateutil.parser.parse(date, **kwargs)
+            except ValueError:
+                if not any(_ in kwargs for _ in ('fuzzy', 'fuzzy_with_tokens')):
+                    parsed_datetime = dateutil.parser.parse(date, fuzzy = True, **kwargs)
+        except Exception as e:
+            logging.getLogger(__name__).error(date + ': ' + str(e))
+    return parsed_datetime
+
+def format_timedelta(comparefrom, compareto, zh = False):
+    attrs = {
+        'years' :   '年',
+        'months' :  '月',
+        'days' :    '日',
+        'hours' :   '时',
+        'minutes' : '分',
+        'seconds' : '秒',
+    }
+    if comparefrom == compareto:
+        return '刚刚' if zh else 'Just now'
+    try:
+        delta = dateutil.relativedelta.relativedelta(comparefrom, compareto)
+        delta.microseconds = 0  # Ignore ms
+    except TypeError:
+        return ''
+    if not delta:
+        return '刚刚' if zh else 'Just now'
+    deltastr = ''
+    for k, _ in attrs.items():
+        n = getattr(delta, k)
+        if n:
+            if zh:
+                deltastr += '%d%s' % (abs(n), _)
+            else:
+                deltastr += '%d %s ' % (abs(n), k)
+    if comparefrom > compareto:
+        deltastr += '之前' if zh else 'ago'
+    else:
+        deltastr += '之后' if zh else 'later'
+    return deltastr
+
+def format_timedelta_to_hms(td):
+    seconds = int(td.total_seconds())
+    periods = [
+        60 * 60,    # 1 Hour
+        60,         # 1 Minute
+        1
+    ]
+    strings = []
+    for psec in periods:
+        units, seconds = divmod(seconds, psec)
+        strings.append(units)
+    return joiniterable(':', strings)
+
+def format_timedelta_to_utcoffset(td):
+    rd = dateutil.relativedelta.relativedelta(seconds = int(td.total_seconds()))
+    return 'UTC{}{:d}{}'.format('-' if td.total_seconds() < 0 else '+', abs(rd.hours), (':' + str(abs(rd.minutes)) if rd.minutes else ''))
+
+format_mapping = lambda format : {
+    'DMY' :     { 'dayfirst' :  True },
+    'YMD' :     { 'yearfirst' : True },
+    'YDM' :     { 'dayfirst' :  True, 'yearfirst' : True },
+    }.get(format, {})
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    datetimes = args.datetime
+    if not args.datetime and not args.infile:
+        args.infile = ( sys.stdin, )
+    for f in args.infile or ():
+        if f == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        datetimes.extend(f.read().splitlines())
+    compare_from = datetime.datetime.now()
+    if args.compare_from:
+        compare_from = tryparse(args.compare_from, **format_mapping(args.format))
+    tzname = datetime.datetime.now(datetime.timezone.utc).astimezone().tzname() or datetime.datetime.now(dateutil.tz.tzlocal()).tzname()
+    utcoffset = datetime.datetime.now(datetime.timezone.utc).astimezone().utcoffset() or datetime.datetime.now(dateutil.tz.tzlocal()).utcoffset()
+    utcoffset = format_timedelta_to_utcoffset(utcoffset)
+    print(ttyautocolorize(sys.stdout, 'The current time zone %s, UTC offset %s.' % (xstr(tzname), utcoffset), set = ( 'italic', )))
+    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_column('<')
+    pt.add_field('Argument:')
+    pt.add_field('Parsed:')
+    pt.add_field('UTC:')
+    pt.add_field('Local')
+    pt.add_field('UNIX timestamp:')
+    pt.add_field('UTC offset:')
+    pt.add_field('Time zone:')
+    pt.add_field('Relative time:')
+    for d in datetimes:
+        parsed_datetime = tryparse(d, **format_mapping(args.format))
+        if not parsed_datetime:
+            continue
+        deltastr = ''
+        if compare_from:
+            deltastr = format_timedelta(compare_from, parsed_datetime)
+        utcoffset = ''
+        if parsed_datetime.utcoffset():
+            utcoffset = format_timedelta_to_utcoffset(parsed_datetime.utcoffset())
+        try:
+            # ValueError is thrown when 't1122'
+            pt.add_record(repr(d),
+                parsed_datetime.isoformat() if args.iso else str(parsed_datetime),
+                parsed_datetime.astimezone(dateutil.tz.tzutc()).isoformat() if args.iso else str(parsed_datetime.astimezone(dateutil.tz.tzutc())),
+                parsed_datetime.astimezone(dateutil.tz.tzlocal()).isoformat() if args.iso else str(parsed_datetime.astimezone(dateutil.tz.tzlocal())),
+                parsed_datetime.timestamp(),
+                utcoffset,
+                ', '.join((_ for _ in (xstr(parsed_datetime.tzinfo), xstr(parsed_datetime.tzname())) if _)),
+                deltastr)
+        except Exception as e:
+            logging.getLogger(__name__).error(d + ': ' + str(e))
+    print(pt)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

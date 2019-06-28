@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, ipaddress, textwrap, argparse, logging
+from extras import ColoredArgParser
+from extras import AnsiColored
+from extras import PrettyVTable
+from extras import joiniterable
+from extras import init_colored_logger
+from extras import init_colored
+from extras import streamistty
+from extras import humanizedbinip
+
+def parse_args():
+    parser = ColoredArgParser(description = 'IP / CIDR / Subnet calculator.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-c', '--collapsed',
+        action = 'store_true',
+        default = False, help = 'Collapsed network addresses.')
+    parser.add_argument('-s', '--summarized',
+        action = 'store_true',
+        default = False, help = 'Summarized network range from IP addresses.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('ips',
+        nargs = '*',
+        help = 'IP addresses.')
+    return parser.parse_args()
+
+classful_networks = {
+    'A': ipaddress.IPv4Network("0.0.0.0/8"),
+    'B': ipaddress.IPv4Network("128.0.0.0/16"),
+    'C': ipaddress.IPv4Network("192.0.0.0/24"),
+    'D': ipaddress.IPv4Network("224.0.0.0/4"),
+    'E': ipaddress.IPv4Network("240.0.0.0/4"),
+}
+
+# Classify for IPv4
+def classify(netoraddr):
+    if isinstance(netoraddr, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        for name, net in classful_networks.items():
+            if netoraddr in net:
+                return name
+    return ''
+
+def info(ips):
+    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('Argument:')
+    pt.add_field('Version:')
+    pt.add_field('IP:')
+    pt.add_field('Decimal:')
+    pt.add_field('Binary:')
+    pt.add_field('Multicast:')
+    pt.add_field('Private:')
+    pt.add_field('Global:')
+    pt.add_field('Unspecified:')
+    pt.add_field('Loopback:')
+    pt.add_field('Link-Local:')
+    pt.add_field('Class:')
+    pt.add_field('Network address:')
+    pt.add_field('Length of prefix:')
+    pt.add_field('Broadcast address:')
+    pt.add_field('Host mask:')
+    pt.add_field('Network mask:')
+    pt.add_field('Number of addresses:')
+    pt.add_field('Subnets:')
+    pt.add_field('Supernet:')
+    for ip in ips:
+        try:
+            if ip.isdigit():
+                ipif = ipaddress.ip_interface(int(ip))
+            else:
+                ipif = ipaddress.ip_interface(ip)
+        except Exception as e:
+            logging.getLogger(__name__).error(ip + ': ' + str(e))
+            continue
+        if '/' in ip:
+            netoraddr = ipif.network
+            subnets = joiniterable(', ', netoraddr.subnets())
+            supernet = str(netoraddr.supernet())
+        else:
+            netoraddr = ipif.ip
+            subnets = supernet = ''
+        pt.add_record(
+            repr(ip),
+            netoraddr.version,
+            str(ipif.ip),
+            int(ipif.ip),
+            humanizedbinip(ipif.ip),
+            netoraddr.is_multicast,
+            netoraddr.is_private,
+            netoraddr.is_global,
+            netoraddr.is_unspecified,
+            netoraddr.is_loopback,
+            netoraddr.is_link_local,    # rfc3927
+            classify(netoraddr),
+            str(getattr(netoraddr, 'network_address', '')),
+            getattr(netoraddr, 'prefixlen', ''),
+            str(getattr(netoraddr, 'broadcast_address', '')),
+            str(getattr(netoraddr, 'hostmask', '')),
+            str(getattr(netoraddr, 'netmask', '')),
+            getattr(netoraddr, 'num_addresses', ''),
+            subnets,
+            supernet)
+    print(pt)
+
+def collapsed(ips):
+    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('IPs')
+    pt.add_field('Collapse addresses')
+    _ips = joiniterable(', ', ips)
+    try:
+        pt.add_record(_ips,
+            joiniterable(', ', ipaddress.collapse_addresses(( ipaddress.ip_network(_, strict = False) for _ in ips))))
+    except Exception as e:
+        logging.getLogger(__name__).error(_ips + ': ' + str(e))
+        return
+    print(pt)
+
+def summarized(ips):
+    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('IPs')
+    pt.add_field('Summarize network range')
+    _ips = joiniterable(', ', ips)
+    try:
+        addresses = list(ipaddress.ip_address(_) for _ in ips)
+        pt.add_record(_ips, joiniterable(', ', ipaddress.summarize_address_range(min(addresses), max(addresses))))
+    except Exception as e:
+        logging.getLogger(__name__).error(_ips + ': ' + str(e))
+        return
+    print(pt)
+
+optmap = {
+    'collapsed' :   collapsed,
+    'summarized' :  summarized,
+}
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    ips = args.ips
+    if not args.ips and not args.infile:
+        args.infile = ( sys.stdin, )
+    for f in args.infile or ():
+        if f == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        ips.extend(f.read().split())
+    cbs = [ _ for opt, _ in optmap.items() if getattr(args, opt, False) ]
+    if not cbs:
+        cbs.append(info)
+    for cb in cbs:
+        cb(ips)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

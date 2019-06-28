@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, argparse, os, encodings
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import init_colored
+from extras import streamistty
+from extras import has_fuzzy_matched
+from extras import has_substr_matched
+
+WIDTH_ARGUMENTS = 25
+WIDTH_NAMES = 25
+WIDTH_ALIASES = 20
+
+def parse_args():
+    parser = ColoredArgParser(description = 'List or find the IANA character set names.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-l', '--list',
+        action = 'store_true',
+        help = 'List of character set names.')
+    parser.add_argument('-f', '--fuzzy',
+        action = 'store_true',
+        default = False,
+        dest = 'is_fuzzy',
+        help = 'Enable fuzzy matching.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('words',
+        nargs = '*',
+        help = 'Search for encodings contains all the given words.')
+    return parser.parse_args()
+
+def listall():
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Alias', alignment = '<', fixed_width = WIDTH_ALIASES)
+    for k, v in encodings.aliases.aliases.items():
+        pt.add_record('', k, v)
+    print(pt)
+
+def listfound(words, is_fuzzy):
+    if not words:
+        return
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Alias', alignment = '<', fixed_width = WIDTH_ALIASES)
+    for word in words:
+        normalized_name = encodings.normalize_encoding(word)
+        for k, v in encodings.aliases.aliases.items():
+            haystack = (k, v)
+            if has_substr_matched(normalized_name, haystack, ignore_case = True)    \
+                or (is_fuzzy and has_fuzzy_matched(normalized_name, haystack, ignore_case = True)):
+                pt.add_record(repr(word), k, v)
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    if args.list:
+        listall()
+    words = args.words
+    if not args.list and not args.words and not args.infile:
+        args.infile = ( sys.stdin, )
+    for file in args.infile or ():
+        if file == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        words.extend(file.read().split())
+    listfound(words, args.is_fuzzy)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

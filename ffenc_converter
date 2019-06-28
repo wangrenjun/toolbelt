@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+
+readonly SCRIPT_NAME="$(basename ${0})"
+readonly TAIL=".converted"
+
+usage()
+{
+    cat << EOF >&2
+USAGE: $SCRIPT_NAME [--name <pattern>] [--iname <pattern>] [-f <from encoding> | --from <from encoding>] [-t <to encoding> | --to <to encoding>]
+            [-d | --dos2unix] [-m | --mac2unix] [-o | --override] [-h | --help]
+            FILE
+
+OPTIONS
+
+EOF
+    exit
+}
+
+join_by()
+{
+    local d="${1}"; shift; echo -n "$1"; shift; printf "%s" "${@/#/$d}";
+}
+
+__log_field_delimiter=': '
+readonly CO_NORMAL=$(echo -en "\e[0m")
+readonly CO_RED=$(echo -en "\e[31m")
+
+log_info()
+{
+    local line=$(join_by "${__log_field_delimiter}" 'info' "${SCRIPT_NAME}" "${@}")
+    echo -e "${line}" >&2
+}
+
+log_error()
+{
+    local line=$(join_by "${__log_field_delimiter}" 'error' "${SCRIPT_NAME}" "${@}")
+    echo -e "${CO_RED}${line}${CO_NORMAL}" >&2
+}
+
+is_number()
+{
+    [[ "${1}" =~ ^-?[0-9]+$ ]]
+}
+
+declare -r EC_ILLEGAL_CMD=127       # Command not found
+declare -r EC_FATAL_SIGNAL_BASE=128 # Base value for fatal error signal "n"
+
+# Default trap handler
+on_trapped()
+{
+    local num name
+    if is_number "${1}"; then
+        num="${1}"
+        name=$(kill -l "${1}")
+    else
+        name="${1}"
+        num=$(kill -l "${1}")
+    fi
+    log_info "Interrupted by signal $name"
+    exit "$((EC_FATAL_SIGNAL_BASE + num))"
+}
+
+set_trap_handler()
+{
+    local func="${1}" sig; shift
+    for sig ; do
+        trap "$func $sig" "$sig"
+    done
+}
+
+has_command()
+{
+    command -v "${1}" &> /dev/null
+}
+
+convert_file()
+{
+    infile="${1}"
+    if [ -n "$fmt_cmd" ]; then
+        command="$fmt_cmd -q -k ${override:--n} $infile"
+        if [ -z "$override" ]; then
+            command="$command ${1}${TAIL}"
+            infile="${1}${TAIL}"
+        fi
+        rs=$(eval "$command" 2>&1); rv="${?}"
+        if [ "$rv" != 0 ] || [ "${#rs}" != 0 ]; then
+            log_error "${1}" "$rs"
+            #log_error "${1}" 'File format conversion failed'
+            return 1
+        fi
+    fi
+    if [ -n "$from" ] && [ -n "$to" ]; then
+        command="iconv -f $from -t $to $infile"
+        if [ -z "$override" ]; then
+            command="$command | sponge ${1}${TAIL}"
+        else
+            command="$command | sponge ${infile}"
+        fi
+        rs=$(eval "$command" 2>&1); rv="${?}"
+        if [ "$rv" != 0 ] || [ "${#rs}" != 0 ]; then
+            log_error "${1}" "$rs"
+            #log_error "${1}" 'File encoding conversion failed'
+            return 1
+        fi
+    fi
+}
+
+convert_dir()
+{
+    names=$(join_by ' -o ' "${patterns[@]}")
+    file_list=$(eval "find ${1} -type f $names" 2> /dev/null)
+    for f in $file_list; do
+        convert_file "$f"
+    done
+}
+
+main()
+{
+    if ! has_command dos2unix || ! has_command mac2unix; then
+        logerr 'Running this script require the dos2unix<http://waterlan.home.xs4all.nl/dos2unix.html> to be installed'
+        exit "$EC_ILLEGAL_CMD"
+    fi
+    if ! has_command sponge; then
+        logerr 'Running this script require the moreutils<https://joeyh.name/code/moreutils/> to be installed'
+        exit "$EC_ILLEGAL_CMD"
+    fi
+
+    # Interrupted script by SIGHUP / SIGINT / SIGQUIT / SIGTERM
+    set_trap_handler on_trapped SIGHUP SIGINT SIGQUIT SIGTERM
+
+    [ "${#}" = 0 ] && usage
+    opts=$(getopt -o f:t:dmoh --long name:,iname:,from:,to:,dos2unix,mac2unix,override,help -n "$SCRIPT_NAME" -- "$@")
+    if [ "${?}" != 0 ]; then
+        log_error 'Failed to parsing options'
+        usage
+    fi
+    patterns=()
+    eval set -- "$opts"
+    while true; do
+        case "${1}" in
+            --name )            patterns+=("-name '${2}'"); shift 2 ;;
+            --iname )           patterns+=("-iname '${2}'"); shift 2 ;;
+            -f | --from )       from="${2}"; shift 2 ;;
+            -t | --to )         to="${2}"; shift 2 ;;
+            -d | --dos2unix )   fmt_cmd='dos2unix'; shift ;;
+            -m | --mac2unix )   fmt_cmd='mac2unix'; shift ;;
+            -o | --override )   override='-o'; shift ;;
+            -h | --help)        usage ;;
+            -- )                shift; break ;;
+            * )                 log_error 'Internal error'; usage ;;
+        esac
+    done
+    [ -z "$fmt_cmd" ] && [ -z "$from" -o -z "$to" ] && usage
+    [ "${#}" -eq 0 ] && usage
+    while [ "${#}" -gt 0 ]; do
+        if [ -f "${1}" ]; then
+            convert_file "${1}"
+        elif [ -d "${1}" ]; then
+            convert_dir "${1}"
+        else
+            logerr "${1}" 'Target does not exist'
+        fi
+        shift
+    done
+}
+
+main "${@}"

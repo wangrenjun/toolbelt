@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, os, argparse, difflib
+from extras import ColoredArgParser
+from extras import FileRead
+from extras import ttyautocolorize
+from extras import trydecodingbytes
+from extras import init_colored
+
+DEFAULT_MODULE = 'difflib'
+
+def is_valid_file(parser, f):
+    if f != '-' and not os.path.isfile(f):
+        parser.error("%s: No such file" % f)
+    else:
+        return f
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Compute text similarity matching using difflib.SequenceMatcher(built-in) and python-Levenshtein / FuzzyWuzzy if installed.')
+    parser.add_argument('-o', '--original',
+        type = lambda f: is_valid_file(parser, f),
+        default = '-',
+        help = 'The original file.')
+    parser.add_argument('-d', '--duplicate',
+        type = lambda f: is_valid_file(parser, f),
+        default = '-',
+        help = 'The duplicate file.')
+    parser.add_argument('--original-encoding',
+        dest = 'original_encoding',
+        default = None,
+        help = 'Text encoding of original.')
+    parser.add_argument('--duplicate-encoding',
+        dest = 'duplicate_encoding',
+        default = None,
+        help = 'Text encoding of duplicate.')
+    parser.add_argument('-m', '--module',
+        action = 'append',
+        choices = ['difflib', 'python-Levenshtein', 'FuzzyWuzzy'],
+        help = 'Specify which modules or libraries to used. Supported difflib, python-Levenshtein, FuzzyWuzzy. the default is difflib.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    return parser.parse_args()
+
+def on_levenshtein(x, y):
+    import Levenshtein
+    return Levenshtein.ratio(x, y)
+
+def on_fuzzywuzzy(x, y):
+    from fuzzywuzzy import fuzz
+    return fuzz.ratio(x, y)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    readhook = (lambda f: ''.join(f.read().splitlines())) if args.original_encoding else (lambda f: b''.join(f.read().splitlines()))
+    mode = 'rt' if args.original_encoding else 'rb'
+    openhook = FileRead.hook_open(encoding = args.original_encoding)
+    fr = FileRead(args.original, mode = mode, prompt_when_stdin = 'Enter the original(Press Ctrl-D when finished).', openhook = openhook, readhook = readhook)
+    original_text = next(iter(fr))
+    original_filename = fr.filename()
+    if not args.original_encoding:
+        original_text, args.original_encoding = trydecodingbytes(original_text)
+
+    readhook = (lambda f: ''.join(f.read().splitlines())) if args.duplicate_encoding else (lambda f: b''.join(f.read().splitlines()))
+    mode = 'rt' if args.duplicate_encoding else 'rb'
+    openhook = FileRead.hook_open(encoding = args.duplicate_encoding)
+    fr = FileRead(args.duplicate, mode = mode, prompt_when_stdin = 'Enter the duplicate(Press Ctrl-D when finished).', openhook = openhook, readhook = readhook)
+    duplicate_text = next(iter(fr))
+    duplicate_filename = fr.filename()
+    if not args.duplicate_encoding:
+        duplicate_text, args.duplicate_encoding = trydecodingbytes(duplicate_text)
+
+    isjunk = lambda x: x.isspace()
+    switcher = {
+        'difflib' : lambda x, y: difflib.SequenceMatcher(isjunk = isjunk, a = x, b = y).ratio(),
+        'python-Levenshtein' : on_levenshtein,
+        'FuzzyWuzzy' : on_fuzzywuzzy,
+    }
+    for m in args.module or ( DEFAULT_MODULE, ):
+        ratio = switcher.get(m)(original_text.strip(), duplicate_text.strip())
+        prompt = 'The ratio after compared between %s(%s) and %s(%s) using %s is' % (
+            repr(original_filename),
+            args.original_encoding or 'Unknown',
+            repr(duplicate_filename),
+            args.duplicate_encoding or 'Unknown',
+            m)
+        print(ttyautocolorize(sys.stdout, '%120s: %f' % (prompt, ratio), fgcolor = 'green', set = ( 'bold', )))
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import mimetypes, sys, argparse
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import init_colored
+from extras import streamistty
+from extras import has_fuzzy_matched
+from extras import has_substr_matched
+
+WIDTH_ARGUMENTS = 20
+WIDTH_EXTENSIONS = 15
+WIDTH_MIMETYPES = 50
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Conversion from filename to MIME type and from MIME type to filename extension.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-l', '--list',
+        default = False,
+        action = 'store_true',
+        help = 'List of filename extensions to MIME types.')
+    parser.add_argument('-f', '--fuzzy',
+        action = 'store_true',
+        default = False,
+        dest = 'is_fuzzy',
+        help = 'Enable fuzzy matching.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('words',
+        nargs = '*',
+        help = 'filename / extension / URL / MIME type.')
+    return parser.parse_args()
+
+def listall():
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Extension', alignment = '<', fixed_width = WIDTH_EXTENSIONS)
+    pt.add_field('MIME type', alignment = '<', fixed_width = WIDTH_MIMETYPES)
+    for k, v in mimetypes.types_map.items():
+        pt.add_record('', k, v)
+    for k, v in mimetypes.common_types.items():
+        pt.add_record('', k, v)
+    print(pt)
+
+def listfound(words, is_fuzzy):
+    if not words:
+        return
+    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Extension', alignment = '<', fixed_width = WIDTH_EXTENSIONS)
+    pt.add_field('MIME type', alignment = '<', fixed_width = WIDTH_MIMETYPES)
+    for word in words:
+        for k, v in mimetypes.types_map.items():
+            haystack = (k, v)
+            if has_substr_matched(word, haystack, ignore_case = True)   \
+                or (is_fuzzy and has_fuzzy_matched(word, haystack, ignore_case = True)):
+                pt.add_record(repr(word), k, v)
+        for k, v in mimetypes.common_types.items():
+            haystack = (k, v)
+            if has_substr_matched(word, haystack, ignore_case = True)   \
+                or (is_fuzzy and has_fuzzy_matched(word, haystack, ignore_case = True)):
+                pt.add_record(repr(word), k, v)
+        type = [ j for j in mimetypes.guess_type(word) if j ]
+        extension = mimetypes.guess_all_extensions(word)
+        if type or extension:
+            pt.add_record(repr(word), ' '.join(extension), ' '.join(type))
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    mimetypes.init()
+    if args.list:
+        listall()
+    words = args.words
+    if not args.list and not args.words and not args.infile:
+        args.infile = ( sys.stdin, )
+    for file in args.infile or ():
+        if file == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        words.extend(file.read().split())
+    listfound(words, args.is_fuzzy)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

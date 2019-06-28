@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, ctypes, collections, argparse
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import humanizedbin
+from extras import humanizedoct
+from extras import humanizedhex
+from extras import humanizeddec
+from extras import humanizedtwoscompbin
+from extras import init_colored
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Tattooing the magic numbers.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    return parser.parse_args()
+
+integer_limits = (
+    ('INT8_MIN',    -128),
+    ('INT8_MAX',    127),
+    ('UINT8_MAX',   255),
+    ('INT16_MIN',   -32768),
+    ('INT16_MAX',   32767),
+    ('UINT16_MAX',  65535),
+    ('INT32_MIN',   -2147483648),
+    ('INT32_MAX',   2147483647),
+    ('UINT32_MAX',  4294967295),
+    ('INT64_MIN',   -9223372036854775808),
+    ('INT64_MAX',   9223372036854775807),
+    ('UINT64_MAX',  18446744073709551615),
+)
+
+def list_limits_for_integer():
+    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt.add_field('Constant', alignment = '>')
+    pt.add_field('Decimal', alignment = '>')
+    pt.add_field('Binary', alignment = '>')
+    pt.add_field('Octal', alignment = '>')
+    pt.add_field('Hexadecimal', alignment = '>')
+    for k, v in integer_limits:
+        pt.add_record(k, humanizeddec(v), humanizedbin(v), humanizedoct(v), humanizedhex(v))
+    print(pt)
+
+def list_pow2n(base = 2, maxexponent = 64):
+    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt.add_field('Power of 2', alignment = '>')
+    pt.add_field('Decimal', alignment = '>')
+    pt.add_field('Binary', alignment = '>')
+    pt.add_field('Octal', alignment = '>')
+    pt.add_field('Hexadecimal', alignment = '>')
+    for i in range(maxexponent + 1):
+        res = base ** i
+        pt.add_record('{:d} ** {:d}'.format(base, i), humanizeddec(res), humanizedbin(res), humanizedoct(res), humanizedhex(res))
+    print(pt)
+
+def list_twos_complement(ranger = range(15, -16, -1), bits = 4):
+    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt.add_field('Decimal', alignment = '>')
+    pt.add_field("Two's complement", alignment = '>')
+    pt.add_field('Octal', alignment = '>')
+    pt.add_field('Hexadecimal', alignment = '>')
+    for i in ranger:
+        pt.add_record(i, humanizedtwoscompbin(i, bits = bits), humanizedoct(i), humanizedhex(i))
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    list_limits_for_integer()
+    list_pow2n()
+    list_twos_complement()
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

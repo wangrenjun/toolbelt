@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, os, base64, binascii, itertools, logging
+from extras import ttyautocolorize
+from extras import init_colored
+from extras import ColoredArgParser
+from extras import ColoredLogger
+from extras import init_colored_logger
+from extras import FileRead
+from extras import trydecodingbytes
+from extras import RingLooper
+
+output_palette = ( { 'fgcolor' : 'green',           'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'yellow',          'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'blue',            'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'magenta',         'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'cyan',            'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light green',     'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light yellow',    'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light blue',      'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light magenta',   'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light cyan',      'set' : ( 'bold', ) }, )
+
+LINE_WIDTH = 76
+
+def is_valid_file(parser, f):
+    if f != '-' and not os.path.isfile(f):
+        parser.error("%s: No such file" % f)
+    else:
+        return f
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Support encode/decode of base 16 32 64 85.')
+    parser.add_argument('-c', '--characters',
+        choices = ('16', '32', '64', '85'),
+        default = '64',
+        help = 'The number of characters, the default is 64.')
+    parser.add_argument('-d', '--decode',
+        action = 'store_true',
+        default = False,
+        dest = 'is_decode',
+        help = 'Decode the data.')
+    parser.add_argument('-u', '--urlsafe',
+        action = 'store_true',
+        default = False,
+        dest = 'is_urlsafe',
+        help = 'Using the URL safe alphabet for Base64 only.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = lambda f: is_valid_file(parser, f),
+        help = 'File path.')
+    parser.add_argument('-e', '--encoding',
+        default = None,
+        help = 'Character encoding for decode only.')
+    parser.add_argument('-w', '--nowrap',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nowrap',
+        help = 'Does not wrap when output after encode.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('strings',
+        nargs = '*',
+        help = 'Strings for encoding or decoding.')
+    return parser.parse_args()
+
+def convert(func, bs, is_decode, encoding, is_nowrap, paint):
+    try:
+        converted_bs = func(bs)
+    except binascii.Error as e:
+        logging.getLogger(__name__).error(str(e))
+        return
+    else:
+        if is_decode:
+            if not encoding:
+                s, _ = trydecodingbytes(converted_bs)
+            else:
+                try:
+                    s = converted_bs.decode(encoding = encoding)
+                except UnicodeDecodeError:
+                    s = str(converted_bs)
+            print(ttyautocolorize(sys.stdout, s, **paint))
+        else:
+            s = converted_bs.decode(errors = 'ignore')
+            if not is_nowrap:
+                start = 0
+                while(s[start:]):
+                    lw = min(LINE_WIDTH, len(s[start:]))
+                    print(ttyautocolorize(sys.stdout, '%*.*s' % (-lw, lw, s[start:]), **paint))
+                    start += LINE_WIDTH
+            else:
+                print(ttyautocolorize(sys.stdout, s, **paint))
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    func = eval('base64.%sb%s%s' %
+        ('urlsafe_' if args.characters == '64' and args.is_urlsafe else '',
+        args.characters,
+        'decode' if args.is_decode else 'encode'))
+    paletteiter = iter(RingLooper(*output_palette))
+    for i in args.strings:
+        paint = next(paletteiter)
+        print(ttyautocolorize(sys.stdout, repr(i), **paint))
+        convert(func, i.encode(), args.is_decode, args.encoding, args.is_nowrap, paint)
+    if not args.strings and not args.infile:
+        args.infile = ( '-', )
+    if args.infile:
+        readhook = (lambda f: b''.join(f.read().splitlines())) if args.is_decode else None
+        freader = FileRead(args.infile, mode = 'rb', prompt_when_stdin = 'Press Ctrl-D when finished.', readhook = readhook)
+        for content in freader:
+            paint = next(paletteiter)
+            print(ttyautocolorize(sys.stdout, repr(freader.filename()), **paint))
+            convert(func, content, args.is_decode, args.encoding, args.is_nowrap, paint)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

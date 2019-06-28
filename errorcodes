@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import errno, sys, os, argparse
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import init_colored
+from extras import streamistty
+from extras import has_fuzzy_matched
+from extras import has_substr_matched
+
+WIDTH_ARGUMENTS = 15
+WIDTH_CODES = 5
+WIDTH_NAMES = 20
+WIDTH_MESSAGES = 55
+
+def parse_args():
+    parser = ColoredArgParser(description = 'List or find the errno names and descriptions.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-l', '--list',
+        default = False,
+        action = 'store_true',
+        help = 'List all errno.')
+    parser.add_argument('-f', '--fuzzy',
+        action = 'store_true',
+        default = False,
+        dest = 'is_fuzzy',
+        help = 'Enable fuzzy matching.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('words',
+        nargs = '*',
+        help = 'Search for errors contains all the given words.')
+    return parser.parse_args()
+
+def listall():
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Code', alignment = '<', fixed_width = WIDTH_CODES)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Message', alignment = '<', fixed_width = WIDTH_MESSAGES)
+    for eno in sorted(errno.errorcode.keys()):
+        pt.add_record('', eno, errno.errorcode[eno], os.strerror(eno))
+    print(pt)
+
+def listfound(words, is_fuzzy):
+    if not words:
+        return
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Code', alignment = '<', fixed_width = WIDTH_CODES)
+    pt.add_field('Name', alignment = '<', fixed_width = WIDTH_NAMES)
+    pt.add_field('Message', alignment = '<', fixed_width = WIDTH_MESSAGES)
+    for word in words:
+        if word.isdigit():
+            eno = int(word)
+            ename = errno.errorcode.get(eno)
+            if ename:
+                pt.add_record(repr(word), eno, ename, os.strerror(eno))
+        else:
+            for eno, ename in errno.errorcode.items():
+                msg = os.strerror(eno)
+                haystack = (ename, msg)
+                if has_substr_matched(word, haystack, ignore_case = True)   \
+                    or (is_fuzzy and has_fuzzy_matched(word, haystack, ignore_case = True)):
+                    pt.add_record(repr(word), eno, ename, msg)
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    if args.list:
+        listall()
+    words = args.words
+    if not args.list and not args.words and not args.infile:
+        args.infile = ( sys.stdin, )
+    for file in args.infile or ():
+        if file == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        words.extend(file.read().split())
+    listfound(words, args.is_fuzzy)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

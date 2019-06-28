@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, argparse, logging
+from extras import ColoredArgParser
+from extras import init_colored_logger
+from extras import PrettyVTable
+from extras import init_colored
+from extras import streamistty
+
+DEFAULT_MODULE = 'UnicodeDammit'    # bs4.UnicodeDammit
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Universal character encoding detector.')
+    parser.add_argument('-m', '--module',
+        action = 'append',
+        choices = ['UnicodeDammit', 'chardet', 'cchardet'],
+        help = 'Specify which modules or libraries to used. Supported bs4.UnicodeDammit, chardet, cchardet. the default is bs4.UnicodeDammit.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('files',
+        nargs = '*',
+        type = argparse.FileType(mode = 'rb'),
+        default = ( sys.stdin, ),
+        help = 'Input file.')
+    return parser.parse_args()
+
+def on_unicodedammit(bs):
+    try:
+        import bs4
+        dammit = bs4.UnicodeDammit(bs)
+        return dammit.unicode_markup, str({ 'original encoding': dammit.original_encoding, 'tried encodings' : dammit.tried_encodings})
+    except:
+        raise
+
+def on_chardet(bs):
+    try:
+        import chardet
+        encoding = chardet.detect(bs)
+        return bs.decode(encoding = encoding['encoding']), str(encoding)
+    except:
+        raise
+
+def on_cchardet(bs):
+    try:
+        import cchardet
+        encoding = cchardet.detect(bs)
+        return bs.decode(encoding = encoding['encoding']), str(encoding)
+    except:
+        raise
+
+module_switcher = {
+    'UnicodeDammit' :   on_unicodedammit,
+    'chardet' :         on_chardet,
+    'cchardet' :        on_cchardet,
+}
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('Module:')
+    pt.add_field('File:')
+    pt.add_field('Encoding:')
+    pt.add_field('Converted:')
+    for file in args.files:
+        if file == sys.stdin:
+            file = sys.stdin.buffer
+            print('Press Ctrl-D when finished.', flush = True)
+        bs = file.read()
+        for m in args.module or ( DEFAULT_MODULE, ):
+            try:
+                converted_text, encoding = module_switcher.get(m)(bs)
+            except Exception as e:
+                logging.getLogger(__name__).error(file + ': ' + str(e))
+                continue
+            pt.add_record(m, file.name, encoding, converted_text)
+    print(pt)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

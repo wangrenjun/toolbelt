@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, os, socket, argparse, logging, collections
+from extras import ColoredArgParser
+from extras import PrettyTable
+from extras import init_colored
+from extras import streamistty
+from extras import init_colored_logger
+from extras import has_fuzzy_matched
+from extras import has_substr_matched
+
+WIDTH_ARGUMENTS = 15
+WIDTH_SERVICES = 20
+WIDTH_PROTOCOLS = 10
+WIDTH_PORTS = 10
+
+def parse_args():
+    parser = ColoredArgParser(description = 'List or find the mapping between services and ports.')
+    parser.add_argument('-i', '--infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Input file.')
+    parser.add_argument('-l', '--list',
+        default = False,
+        action = 'store_true',
+        help = 'List of all errno.')
+    parser.add_argument('-f', '--fuzzy',
+        action = 'store_true',
+        default = False,
+        dest = 'is_fuzzy',
+        help = 'Enable fuzzy matching.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser.add_argument('words',
+        nargs = '*',
+        help = 'Search for service contains all the given words.')
+    return parser.parse_args()
+
+port_proto_service_map = collections.defaultdict(dict)
+service_proto_port_map = collections.defaultdict(dict)
+
+if sys.platform == 'win32':
+    services_file = 'C:\WINDOWS\system32\drivers\etc\services'
+else:
+    services_file = '/etc/services'
+
+def load_services(file = None):
+    if file == None:
+        file = services_file
+    try:
+        with open(file, mode = 'r') as f:
+            for line in f:
+                if line[0:1] != '#' and not line.isspace():
+                    field = line.split()
+                    service = field[0]
+                    pp = field[1].split('/', )
+                    port, proto = pp[0], pp[1]
+                    port_proto_service_map[port][proto] = service
+                    service_proto_port_map[service][proto] = port
+    except FileNotFoundError as e:
+        logging.getLogger(__name__).error(file + ': ' + str(e))
+        return False
+    return True
+
+def load_services_by_ports():
+    for port in range(0, 65536):
+        try:
+            servicetcp = socket.getservbyport(port, 'tcp')
+            serviceudp = socket.getservbyport(port, 'udp')
+            port_proto_service_map[port] = { 'tcp': servicetcp, 'udp': serviceudp }
+            service_proto_port_map[servicetcp]['tcp'] = port
+            service_proto_port_map[serviceudp]['udp'] = port
+        except Exception as e:
+            logging.getLogger(__name__).error(port + ': ' + str(e))
+
+def listall():
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Service', alignment = '<', fixed_width = WIDTH_SERVICES)
+    pt.add_field('Protocol', alignment = '<', fixed_width = WIDTH_PROTOCOLS)
+    pt.add_field('Port', alignment = '<', fixed_width = WIDTH_PORTS)
+    for serv, pp in service_proto_port_map.items():
+        for proto, port in pp.items():
+            pt.add_record('', serv, proto, port)
+    print(pt)
+
+def listfound(words, is_fuzzy):
+    if not words:
+        return
+    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
+    pt.add_field('Service', alignment = '<', fixed_width = WIDTH_SERVICES)
+    pt.add_field('Protocol', alignment = '<', fixed_width = WIDTH_PROTOCOLS)
+    pt.add_field('Port', alignment = '<', fixed_width = WIDTH_PORTS)
+    for word in words:
+        if word.isdigit():
+            port = word
+            ps = port_proto_service_map.get(port)
+            for proto, serv in ps.items() if ps else ():
+                pt.add_record(repr(word), serv, proto, port)
+        else:
+            for serv, pp in service_proto_port_map.items():
+                for proto, port in pp.items():
+                    haystack = (serv, proto)
+                    if has_substr_matched(word, haystack, ignore_case = True)   \
+                        or (is_fuzzy and has_fuzzy_matched(word, haystack, ignore_case = True)):
+                        pt.add_record(repr(word), serv, proto, port)
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    load_services() or load_services_by_ports()
+    if args.list:
+        listall()
+    words = args.words
+    if not args.list and not args.words and not args.infile:
+        args.infile = ( sys.stdin, )
+    for file in args.infile or ():
+        if file == sys.stdin:
+            print('Press Ctrl-D when finished.', flush = True)
+        words.extend(file.read().split())
+    listfound(words, args.is_fuzzy)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

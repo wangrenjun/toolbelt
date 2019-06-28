@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, argparse, json, urllib.parse, itertools, logging
+from extras import ColoredArgParser
+from extras import init_colored_logger
+from extras import colorize
+from extras import exitcode
+from extras import RingLooper
+from extras import init_colored
+from extras import streamistty
+
+output_palette = ( { 'fgcolor' : 'green', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'yellow', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'blue', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'magenta', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'cyan', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light green', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light yellow', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light blue', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light magenta', 'set' : ( 'bold', ) },
+                   { 'fgcolor' : 'light cyan', 'set' : ( 'bold', ) }, )
+
+JSON_DUMP_INDENT = 4
+
+def url_parse(url):
+    parsed_url = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed_url.query, keep_blank_values = True)
+    return parsed_url, qs
+
+def url_qs_unquote(qs, encoding = None, unquote_via = urllib.parse.unquote_plus):
+    for k, v in qs.items():
+        for i, e in enumerate(v):
+            qs[k][i] = unquote_via(e, encoding = encoding)
+    return qs
+
+def url_qs_quote(qs, encoding = None, quote_via = urllib.parse.quote_plus):
+    for k, v in qs.items():
+        for i, e in enumerate(v):
+            qs[k][i] = quote_via(e, encoding = encoding)
+    return qs
+
+def url_qs_set(url, qs, doseq = False, encoding = None, quote_via = urllib.parse.quote_plus):
+    parsed_url, urlqs = url_parse(url)
+    urlqs.update(qs)
+    parsed_url = list(parsed_url)
+    parsed_url[4] = urllib.parse.urlencode(urlqs, doseq = doseq, encoding = encoding, quote_via = quote_via)
+    return urllib.parse.urlunparse(parsed_url)
+
+def url_qs_unset(url, keys, doseq = False, encoding = None, quote_via = urllib.parse.quote_plus):
+    parsed_url, qs = url_parse(url)
+    if isinstance(keys, str):
+        keys = [ keys, ]
+    qs = { k : v for k, v in qs.items() if k not in keys }
+    parsed_url = list(parsed_url)
+    parsed_url[4] = urllib.parse.urlencode(qs, doseq = doseq, encoding = encoding, quote_via = quote_via)
+    return urllib.parse.urlunparse(parsed_url)
+
+def url_qs_filter(url, keys, doseq = False, encoding = None, quote_via = urllib.parse.quote_plus):
+    parsed_url, qs = url_parse(url)
+    if isinstance(keys, str):
+        keys = [ keys, ]
+    qs = { k : v for k, v in qs.items() if k in keys }
+    parsed_url = list(parsed_url)
+    parsed_url[4] = urllib.parse.urlencode(qs, doseq = doseq, encoding = encoding, quote_via = quote_via)
+    return urllib.parse.urlunparse(parsed_url)
+
+def url_qs_get(url, keys, encoding = None, unquote_via = urllib.parse.unquote_plus):
+    parsed_url, qs = url_parse(url)
+    if isinstance(keys, str):
+        keys = [ keys, ]
+    qs = { k : v for k, v in qs.items() if k in keys }
+    return url_qs_unquote(qs, encoding = encoding, unquote_via = unquote_via)
+
+attribute_map = dict(list(zip(( 'scheme', 'netloc', 'path', 'params', 'query', 'fragment', ), (i for i in range(6)))))
+
+def url_components_set(url, attribute, value):
+    parsed_url, qs = url_parse(url)
+    parsed_url = list(parsed_url)
+    if isinstance(attribute, int):
+        idx = attribute
+    else:
+        idx = attribute_map.get(attribute)
+    parsed_url[idx] = value
+    return urllib.parse.urlunparse(parsed_url)
+
+def parse_args():
+    parser = ColoredArgParser(description = 'Parse URL into components or combine the components back into a URL.')
+    subparsers = parser.add_subparsers(help = 'URLEncode encoding and decoding.', dest = 'subcommand')
+    parser_query = subparsers.add_parser('query',
+        help = 'Parse URL and query string.')
+    parser_query.add_argument('-i', '--infile',
+        dest = 'query_infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'URLs file and it should be UTF-8.')
+    parser_query.add_argument('-s', '--set',
+        dest = 'query_setfile',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Items added to querystring, it should be json and UTF-8.')
+    parser_query.add_argument('-u', '--unset',
+        dest = 'query_unset',
+        action = 'append',
+        help = 'Keys removed from querystring.')
+    parser_query.add_argument('-f', '--filter',
+        dest = 'query_filter',
+        action = 'append',
+        help = 'Keys filtered from querystring.')
+    parser_query.add_argument('-g', '--get',
+        dest = 'query_get',
+        action = 'append',
+        help = 'Keys queried from querystring.')
+    parser_query.add_argument('-e', '--encoding',
+        dest = 'query_encoding',
+        default = None,
+        help = 'Encoding of the querystring.')
+    parser_query.add_argument('-d', '--doseq',
+        dest = 'query_doseq',
+        action = 'store_true',
+        default = False,
+        help = "Using the '&' to separated kv pairs.")
+    parser_query.add_argument('-w', '--without-plus',
+        dest = 'query_without_plus',
+        action = 'store_true',
+        default = False,
+        help = 'Do not replace spaces by plus signs(replace by default).')
+    parser_query.add_argument('url',
+        nargs = '*',
+        help = 'URLs.')
+    parser_urlencode = subparsers.add_parser('urlencode',
+        help = 'Encoding and decoding for URL.')
+    parser_urlencode.add_argument('-d', '--decode',
+        dest = 'urlencode_is_decode',
+        action = 'store_true',
+        default = False,
+        help = 'Decoding.')
+    parser_urlencode.add_argument('-i', '--infile',
+        dest = 'urlencode_infile',
+        action = 'append',
+        type = argparse.FileType(mode = 'r', encoding = 'UTF-8'),
+        help = 'Target file and it should be UTF-8.')
+    parser_urlencode.add_argument('-e', '--encoding',
+        dest = 'urlencode_encoding',
+        default = None,
+        help = 'Secify unicode characters when quote and unquote, the default is UTF-8.')
+    parser_urlencode.add_argument('-w', '--without-plus',
+        dest = 'urlencode_without_plus',
+        action = 'store_true',
+        default = False,
+        help = 'Do not replace spaces by plus signs(replace by default).')
+    parser_urlencode.add_argument('-s', '--splitlines',
+        dest = 'urlencode_is_splitlines',
+        action = 'store_true',
+        default = False,
+        help = 'Split by line.')
+    parser.add_argument('-n', '--nocolor',
+        action = 'store_true',
+        default = False,
+        dest = 'is_nocolor',
+        help = 'No color.')
+    parser_urlencode.add_argument('target',
+        nargs = '*',
+        help = 'Target content.')
+    args = parser.parse_args()
+    if not args.subcommand:
+        parser.print_help()
+        return None
+    return args
+
+def query(args):
+    if args.query_without_plus:
+        quote_via = urllib.parse.quote
+        unquote_via = urllib.parse.unquote
+    else:
+        quote_via = urllib.parse.quote_plus
+        unquote_via = urllib.parse.unquote_plus
+    url_args = args.url
+    if not args.url and not args.query_infile:
+        args.query_infile = ( sys.stdin, )
+    for f in args.query_infile or ():
+        if f.name == '<stdin>':
+            print('Press Ctrl-D when finished.', flush = True)
+        url_args.extend(f.read().splitlines())
+    if args.query_setfile:
+        try:
+            newqs = json.loads(''.join(args.query_setfile.read().splitlines()))
+        except json.JSONDecodeError as e:
+            logging.getLogger(__name__).error(args.query_setfile.name + ': ' + str(e))
+            return exitcode.EC_ERROR
+    paletteiter = iter(RingLooper(*output_palette))
+    enabled = streamistty(sys.stdout)
+    for url in url_args:
+        paint = next(paletteiter)
+        if not url or url.isspace():
+            continue
+        if args.query_setfile:
+            print('%s' %(colorize(repr(url), enabling = enabled, **paint)))
+            url = url_qs_set(url, newqs, doseq = args.query_doseq, encoding = args.query_encoding, quote_via = quote_via)
+            print('%s' %(colorize(url, enabling = enabled, **paint)))
+        elif args.query_unset:
+            print('%s' %(colorize(repr(url), enabling = enabled, **paint)))
+            keys = []
+            for k in args.query_unset:
+                keys += k.split(',')
+            url = url_qs_unset(url, keys, doseq = args.query_doseq, encoding = args.query_encoding, quote_via = quote_via)
+            print('%s' %(colorize(url, enabling = enabled, **paint)))
+        elif args.query_filter:
+            print('%s' %(colorize(repr(url), enabling = enabled, **paint)))
+            keys = []
+            for k in args.query_filter:
+                keys += k.split(',')
+            url = url_qs_filter(url, keys, doseq = args.query_doseq, encoding = args.query_encoding, quote_via = quote_via)
+            print('%s' %(colorize(url, enabling = enabled, **paint)))
+        elif args.query_get:
+            print('%s' %(colorize(repr(url), enabling = enabled, **paint)))
+            keys = []
+            for k in args.query_get:
+                keys += k.split(',')
+            qs = url_qs_get(url, keys, encoding = args.query_encoding, unquote_via = unquote_via)
+            jsonstr = json.dumps(qs, indent = JSON_DUMP_INDENT, sort_keys = True, ensure_ascii = False)
+            print('%s' %(colorize(jsonstr, enabling = enabled, **paint)))
+        else:
+            print('%s' %(colorize(repr(url), enabling = enabled, **paint)))
+            parsed_url, qs = url_parse(url)
+            url_qs_unquote(qs, encoding = args.query_encoding, unquote_via = unquote_via)
+            jsonstr = json.dumps(parsed_url._asdict(), indent = JSON_DUMP_INDENT, sort_keys = True)
+            print('%s' %(colorize(jsonstr, enabling = enabled, **paint)))
+            jsonstr = json.dumps(qs, indent = JSON_DUMP_INDENT, sort_keys = True, ensure_ascii = False)
+            print('%s' %(colorize(jsonstr, enabling = enabled, **paint)))
+
+def urlencode(args):
+    if args.urlencode_without_plus:
+        quote_via = urllib.parse.quote
+        unquote_via = urllib.parse.unquote
+    else:
+        quote_via = urllib.parse.quote_plus
+        unquote_via = urllib.parse.unquote_plus
+    paletteiter = iter(RingLooper(*output_palette))
+    enabled = streamistty(sys.stdout)
+    for t in args.target:
+        paint = next(paletteiter)
+        print('%s' %(colorize(repr(t), enabling = enabled, **paint)))
+        if args.urlencode_is_decode:
+            sequence = unquote_via(t, encoding = args.urlencode_encoding)
+        else:
+            sequence = quote_via(t, encoding = args.urlencode_encoding)
+        print('%s' %(colorize(sequence, enabling = enabled, **paint)))
+    if not args.target and not args.urlencode_infile:
+        args.urlencode_infile = ( sys.stdin, )
+    for f in args.urlencode_infile or ():
+        if f.name == '<stdin>':
+            print('Press Ctrl-D when finished.', flush = True)
+        if args.urlencode_is_splitlines:
+            for line in f.read().splitlines():
+                if not line or line.isspace():
+                    continue
+                paint = next(paletteiter)
+                print('%s' %(colorize(repr(line), enabling = enabled, **paint)))
+                if args.urlencode_is_decode:
+                    sequence = unquote_via(line, encoding = args.urlencode_encoding)
+                else:
+                    sequence = quote_via(line, encoding = args.urlencode_encoding)
+                print('%s' %(colorize(sequence, enabling = enabled, **paint)))
+        else:
+            paint = next(paletteiter)
+            content = f.read()
+            print('%s' %(colorize(repr(f.name), enabling = enabled, **paint)))
+            if args.urlencode_is_decode:
+                sequence = unquote_via(content, encoding = args.urlencode_encoding)
+            else:
+                sequence = quote_via(content, encoding = args.urlencode_encoding)
+            print('%s' %(colorize(sequence, enabling = enabled, **paint)))
+
+def main(args = None):
+    if args is None:
+        return 0
+    init_colored(not args.is_nocolor)
+    init_colored_logger()
+    if args.subcommand == 'query':
+        rv = query(args)
+    elif args.subcommand == 'urlencode':
+        rv = urlencode(args)
+    return rv
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))
