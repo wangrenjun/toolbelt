@@ -7,8 +7,7 @@ from extras import init_colored_logger
 from extras import colorize
 from extras import exitcode
 from extras import RingLooper
-from extras import init_colored
-from extras import streamistty
+from extras import ColoredSetting
 
 output_palette = ( { 'fgcolor' : 'green', 'set' : ( 'bold', ) },
                    { 'fgcolor' : 'yellow', 'set' : ( 'bold', ) },
@@ -86,7 +85,7 @@ def url_components_set(url, attribute, value):
 
 def parse_args():
     parser = ColoredArgParser(description = 'Parse URL into components or combine the components back into a URL.')
-    subparsers = parser.add_subparsers(help = 'URLEncode encoding and decoding.', dest = 'subcommand')
+    subparsers = parser.add_subparsers(help = 'query and urlencode.', dest = 'subcommand')
     parser_query = subparsers.add_parser('query',
         help = 'Parse URL and query string.')
     parser_query.add_argument('-i', '--infile',
@@ -124,6 +123,11 @@ def parse_args():
         action = 'store_true',
         default = False,
         help = 'Do not replace spaces by plus signs(replace by default).')
+    parser_query.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     parser_query.add_argument('url',
         nargs = '*',
         help = 'URLs.')
@@ -153,11 +157,11 @@ def parse_args():
         action = 'store_true',
         default = False,
         help = 'Split by line.')
-    parser.add_argument('-n', '--nocolor',
-        action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+    parser_urlencode.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     parser_urlencode.add_argument('target',
         nargs = '*',
         help = 'Target content.')
@@ -188,7 +192,7 @@ def query(args):
             logging.getLogger(__name__).error(args.query_setfile.name + ': ' + str(e))
             return exitcode.EC_ERROR
     paletteiter = iter(RingLooper(*output_palette))
-    enabled = streamistty(sys.stdout)
+    enabled = ColoredSetting().is_colorize(sys.stdout)
     for url in url_args:
         paint = next(paletteiter)
         if not url or url.isspace():
@@ -236,7 +240,7 @@ def urlencode(args):
         quote_via = urllib.parse.quote_plus
         unquote_via = urllib.parse.unquote_plus
     paletteiter = iter(RingLooper(*output_palette))
-    enabled = streamistty(sys.stdout)
+    enabled = ColoredSetting().is_colorize(sys.stdout)
     for t in args.target:
         paint = next(paletteiter)
         print('%s' %(colorize(repr(t), enabling = enabled, **paint)))
@@ -274,7 +278,7 @@ def urlencode(args):
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
+    ColoredSetting(args.colored)
     init_colored_logger()
     if args.subcommand == 'query':
         rv = query(args)

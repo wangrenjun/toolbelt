@@ -3,12 +3,10 @@
 
 import sys, ipaddress, textwrap, argparse, logging
 from extras import ColoredArgParser
-from extras import AnsiColored
 from extras import PrettyVTable
 from extras import joiniterable
 from extras import init_colored_logger
-from extras import init_colored
-from extras import streamistty
+from extras import ColoredSetting
 from extras import humanizedbinip
 
 def parse_args():
@@ -23,11 +21,11 @@ def parse_args():
     parser.add_argument('-s', '--summarized',
         action = 'store_true',
         default = False, help = 'Summarized network range from IP addresses.')
-    parser.add_argument('-n', '--nocolor',
-        action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+    parser.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     parser.add_argument('ips',
         nargs = '*',
         help = 'IP addresses.')
@@ -50,7 +48,7 @@ def classify(netoraddr):
     return ''
 
 def info(ips):
-    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_column('>')
     pt.add_column('<')
     pt.add_field('Argument:')
@@ -113,7 +111,7 @@ def info(ips):
     print(pt)
 
 def collapsed(ips):
-    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_column('>')
     pt.add_column('<')
     pt.add_field('IPs')
@@ -128,7 +126,7 @@ def collapsed(ips):
     print(pt)
 
 def summarized(ips):
-    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_column('>')
     pt.add_column('<')
     pt.add_field('IPs')
@@ -150,7 +148,7 @@ optmap = {
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
+    ColoredSetting(args.colored)
     init_colored_logger()
     ips = args.ips
     if not args.ips and not args.infile:

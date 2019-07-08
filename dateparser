@@ -8,9 +8,8 @@ from extras import ColoredArgParser
 from extras import ttyautocolorize
 from extras import PrettyVTable
 from extras import joiniterable
-from extras import init_colored
+from extras import ColoredSetting
 from extras import init_colored_logger
-from extras import streamistty
 
 def parse_args():
     parser = ColoredArgParser(description = 'Parse different datetime formats.')
@@ -29,11 +28,11 @@ def parse_args():
         default = False,
         action = 'store_true',
         help = 'Format the datetime using ISO 8601.')
-    parser.add_argument('-n', '--nocolor',
-        action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+    parser.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     parser.add_argument('datetime',
         nargs = '*',
         help = 'Datetimes.')
@@ -114,7 +113,7 @@ format_mapping = lambda format : {
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
+    ColoredSetting(args.colored)
     init_colored_logger()
     datetimes = args.datetime
     if not args.datetime and not args.infile:
@@ -130,7 +129,7 @@ def main(args = None):
     utcoffset = datetime.datetime.now(datetime.timezone.utc).astimezone().utcoffset() or datetime.datetime.now(dateutil.tz.tzlocal()).utcoffset()
     utcoffset = format_timedelta_to_utcoffset(utcoffset)
     print(ttyautocolorize(sys.stdout, 'The current time zone %s, UTC offset %s.' % (xstr(tzname), utcoffset), set = ( 'italic', )))
-    pt = PrettyVTable(enable_painting = streamistty(sys.stdout))
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_column('>')
     pt.add_column('<')
     pt.add_column('<')

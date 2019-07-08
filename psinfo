@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, os, datetime, argparse, logging, psutil
+from extras import ColoredArgParser
+from extras import PrettyVTable
+from extras import init_colored_logger
+from extras import ColoredSetting
+from extras import humanizedbytes
+from extras import humanizedpercentage
+from extras import namedtupledictify
+
+def parse_args():
+    parser = ColoredArgParser(description = 'List system information, network connections and process information.')
+    subparser = parser.add_subparsers(help = 'system, network and process.', dest = 'subcommand')
+    parser_system = subparser.add_parser('system',
+        help = 'List system information.')
+    parser_system.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
+    parser_network = subparser.add_parser('network',
+        help = 'List socket connections.')
+    parser_network.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
+    parser_network.add_argument('-k', '--kind',
+        choices = ['all', 'inet', 'inet4', 'inet6', 'tcp', 'tcp4', 'tcp6', 'udp', 'udp4', 'udp6', 'unix'],
+        default = 'all',
+        help = 'Connection kind value.')
+    parser_process = subparser.add_parser('process',
+        help = 'List process information.')
+    parser_process.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
+    parser_process.add_argument('pids',
+        nargs = '*',
+        help = 'PIDs.')
+    args = parser.parse_args()
+    if not args.subcommand:
+        parser.print_help()
+        return None
+    return args
+
+filting_fields_in_iterable = lambda it, keys: [ { k: getattr(i, k, '') for k in keys if hasattr(i, k) } for i in it ]
+
+def filting_fields_to_human(memdict, keys4size = (), keys4percent = ()):
+    for k in keys4size:
+        size = memdict.get(k)
+        if size is not None:
+            memdict[k] = humanizedbytes(size)
+    for k in keys4percent:
+        percent = memdict.get(k)
+        if percent:
+            memdict[k] = humanizedpercentage(percent)
+    return memdict
+
+def cpu_mem_disk():
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('Number of logical CPUs:')
+    pt.add_field('Number of physical cores:')
+    pt.add_field('Virtual memory:')
+    pt.add_field('Swap memory:')
+    pt.add_field('Disk partitions:')
+    pt.add_field('Disk usage statistics:')
+    virtual_memory = filting_fields_to_human(
+        namedtupledictify(psutil.virtual_memory()),
+        keys4size = ('total', 'available', 'used', 'free', 'active', 'inactive', 'buffers', 'cached', 'shared', 'slab'),
+        keys4percent = ('percent', ))
+    swap_memory = filting_fields_to_human(
+        namedtupledictify(psutil.swap_memory()),
+        keys4size = ('total', 'used', 'free', 'sin', 'sout'),
+        keys4percent = ('percent', ))
+    dus = [ filting_fields_to_human(namedtupledictify(psutil.disk_usage(p.mountpoint)), keys4size = ('total', 'used', 'free'), keys4percent = ('percent', )) for p in psutil.disk_partitions() ]
+    pt.add_record(psutil.cpu_count(),
+        psutil.cpu_count(logical = False),
+        virtual_memory,
+        swap_memory,
+        psutil.disk_partitions(),
+        dus)
+    print(pt)
+
+def net_connections(kind):
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('Local address:')
+    pt.add_field('Remote address:')
+    pt.add_field('Address family:')
+    pt.add_field('Address type:')
+    pt.add_field('Status:')
+    pt.add_field('PID:')
+    pt.add_field('Executable:')
+    pt.add_field('Command line:')
+    pt.add_field('Create time:')
+    pt.add_field('Owner:')
+    for c in psutil.net_connections(kind):
+        if c.pid:
+            p = psutil.Process(c.pid)
+            pinfo = (p.exe(), ' '.join(p.cmdline()), datetime.datetime.fromtimestamp(p.create_time()).strftime("%Y-%m-%d %H:%M:%S"), p.username())
+        else:
+            pinfo = ('', '', '', '')
+        pt.add_record(c.laddr,
+            c.raddr,
+            c.family,
+            c.type,
+            c.status,
+            c.pid,
+            *pinfo)
+    print(pt)
+
+rlimit_const_map = {
+        psutil.RLIMIT_AS:           'RLIMIT_AS',
+        psutil.RLIMIT_CORE:         'RLIMIT_CORE',
+        psutil.RLIMIT_CPU:          'RLIMIT_CPU',
+        psutil.RLIMIT_DATA:         'RLIMIT_DATA',
+        psutil.RLIMIT_FSIZE:        'RLIMIT_FSIZE',
+        psutil.RLIMIT_LOCKS:        'RLIMIT_LOCKS',
+        psutil.RLIMIT_MEMLOCK:      'RLIMIT_MEMLOCK',
+        psutil.RLIMIT_MSGQUEUE:     'RLIMIT_MSGQUEUE',
+        psutil.RLIMIT_NICE:         'RLIMIT_NICE',
+        psutil.RLIMIT_NOFILE:       'RLIMIT_NOFILE',
+        psutil.RLIMIT_NPROC:        'RLIMIT_NPROC',
+        psutil.RLIMIT_RSS:          'RLIMIT_RSS',
+        psutil.RLIMIT_RTPRIO:       'RLIMIT_RTPRIO',
+        psutil.RLIMIT_RTTIME:       'RLIMIT_RTTIME',
+        psutil.RLIMIT_SIGPENDING:   'RLIMIT_SIGPENDING',
+        psutil.RLIMIT_STACK:        'RLIMIT_STACK', }
+
+def rlimits(p):
+    return tuple(map(lambda c: p.rlimit(c), rlimit_const_map.keys()))
+
+def process(pids):
+    if not pids:
+        return
+    pt = PrettyVTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
+    pt.add_column('>')
+    pt.add_column('<')
+    pt.add_field('PID:')
+    pt.add_field('PPID:')
+    pt.add_field('Name:')
+    pt.add_field('Executable:')
+    pt.add_field('Current working directory:')
+    pt.add_field('Command line:')
+    pt.add_field('Create time:')
+    pt.add_field('Status:')
+    pt.add_field('Owner:')
+    pt.add_field('UIDs:')
+    pt.add_field('GIDs:')
+    pt.add_field('TTY:')
+    pt.add_field('Priority:')
+    pt.add_field('I/O priority:')
+    pt.add_field('I/O statistics:')
+    pt.add_field('Number of file descriptors:')
+    pt.add_field('Number of file threads:')
+    pt.add_field('Threads:')
+    pt.add_field('CPU times:')
+    pt.add_field('CPU percent:')
+    pt.add_field('CPU affinity:')
+    pt.add_field('Number of CPU running:')
+    pt.add_field('Memory info:')
+    pt.add_field('Memory full info:')
+    pt.add_field('Memory percent:')
+    pt.add_field('Files opened:')
+    pt.add_field('Connections:')
+    pt.add_field('Running:')
+    pt.add_field('Environments:')
+    pt.add_field('Childrens:')
+    #pt.add_field('Memory maps:')
+    for c in rlimit_const_map.values():
+        pt.add_field(c + ':')
+    for pid in pids:
+        try:
+            p = psutil.Process(int(pid))
+            pt.add_record(
+                p.pid,
+                p.ppid(),
+                p.name(),
+                p.exe(),
+                p.cwd(),
+                p.cmdline(),
+                datetime.datetime.fromtimestamp(p.create_time()).strftime("%Y-%m-%d %H:%M:%S"),
+                p.status(),
+                p.username(),
+                p.uids(),
+                p.gids(),
+                p.terminal(),
+                p.nice(),
+                p.ionice(),
+                filting_fields_to_human(
+                    namedtupledictify(p.io_counters()),
+                    keys4size = ('read_bytes', 'write_bytes', 'read_chars', 'write_chars')),
+                p.num_fds(),
+                p.num_threads(),
+                p.threads(),
+                p.cpu_times(),
+                humanizedpercentage(p.cpu_percent()),
+                p.cpu_affinity(),
+                p.cpu_num(),
+                filting_fields_to_human(
+                    namedtupledictify(p.memory_info()),
+                    keys4size = ('rss', 'vms', 'uss', 'pss', 'swap')),
+                filting_fields_to_human(
+                    namedtupledictify(p.memory_full_info()),
+                    keys4size = ('rss', 'vms', 'uss', 'pss', 'swap')),
+                humanizedpercentage(p.memory_percent()),
+                p.open_files(),
+                p.connections(),
+                p.is_running(),
+                p.environ(),
+                p.children(),   # filting_fields_in_iterable(p.children(), ('pid',)),
+                # p.memory_maps(),
+                *rlimits(p))
+        except Exception as e:
+            logging.getLogger(__name__).error(str(e))
+            continue
+    print(pt)
+
+def main(args = None):
+    if args is None:
+        return 0
+    ColoredSetting(args.colored)
+    init_colored_logger()
+    if args.subcommand == 'system':
+        cpu_mem_disk()
+    elif args.subcommand == 'network':
+        net_connections(args.kind)
+    elif args.subcommand == 'process':
+        pids = args.pids
+        if not pids:
+            print('Press Ctrl-D when finished.', flush = True)
+            pids.extend(sys.stdin.read().split())
+        process(pids)
+
+if __name__ == '__main__':
+    sys.exit(main(parse_args()))

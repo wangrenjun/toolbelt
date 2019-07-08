@@ -4,9 +4,9 @@
 import sys, os, argparse, difflib
 from extras import ColoredArgParser
 from extras import FileRead
-from extras import ttyautocolorize
+from extras import colorize
 from extras import trydecodingbytes
-from extras import init_colored
+from extras import ColoredSetting
 
 DEFAULT_MODULE = 'difflib'
 
@@ -38,11 +38,11 @@ def parse_args():
         action = 'append',
         choices = ['difflib', 'python-Levenshtein', 'FuzzyWuzzy'],
         help = 'Specify which modules or libraries to used. Supported difflib, python-Levenshtein, FuzzyWuzzy. the default is difflib.')
-    parser.add_argument('-n', '--nocolor',
-        action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+    parser.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     return parser.parse_args()
 
 def on_levenshtein(x, y):
@@ -56,7 +56,7 @@ def on_fuzzywuzzy(x, y):
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
+    ColoredSetting(args.colored)
     readhook = (lambda f: ''.join(f.read().splitlines())) if args.original_encoding else (lambda f: b''.join(f.read().splitlines()))
     mode = 'rt' if args.original_encoding else 'rb'
     openhook = FileRead.hook_open(encoding = args.original_encoding)
@@ -89,7 +89,10 @@ def main(args = None):
             repr(duplicate_filename),
             args.duplicate_encoding or 'Unknown',
             m)
-        print(ttyautocolorize(sys.stdout, '%120s: %f' % (prompt, ratio), fgcolor = 'green', set = ( 'bold', )))
+        print(colorize('%120s: %f' % (prompt, ratio),
+            enabling = ColoredSetting().is_colorize(sys.stdout),
+            fgcolor = 'green',
+            set = ( 'bold', )))
 
 if __name__ == '__main__':
     sys.exit(main(parse_args()))

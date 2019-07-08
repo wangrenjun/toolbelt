@@ -4,8 +4,7 @@
 import mimetypes, sys, argparse
 from extras import ColoredArgParser
 from extras import PrettyTable
-from extras import init_colored
-from extras import streamistty
+from extras import ColoredSetting
 from extras import has_fuzzy_matched
 from extras import has_substr_matched
 
@@ -22,24 +21,24 @@ def parse_args():
     parser.add_argument('-l', '--list',
         default = False,
         action = 'store_true',
-        help = 'List of filename extensions to MIME types.')
+        help = 'List filename extensions to MIME types.')
     parser.add_argument('-f', '--fuzzy',
         action = 'store_true',
         default = False,
         dest = 'is_fuzzy',
         help = 'Enable fuzzy matching.')
-    parser.add_argument('-n', '--nocolor',
-        action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+    parser.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
     parser.add_argument('words',
         nargs = '*',
         help = 'filename / extension / URL / MIME type.')
     return parser.parse_args()
 
 def listall():
-    pt = PrettyTable(enable_painting = streamistty(sys.stdout))
+    pt = PrettyTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_field('', alignment = '<', fixed_width = WIDTH_ARGUMENTS)
     pt.add_field('Extension', alignment = '<', fixed_width = WIDTH_EXTENSIONS)
     pt.add_field('MIME type', alignment = '<', fixed_width = WIDTH_MIMETYPES)
@@ -52,7 +51,7 @@ def listall():
 def listfound(words, is_fuzzy):
     if not words:
         return
-    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt = PrettyTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_field('Argument', alignment = '>', fixed_width = WIDTH_ARGUMENTS)
     pt.add_field('Extension', alignment = '<', fixed_width = WIDTH_EXTENSIONS)
     pt.add_field('MIME type', alignment = '<', fixed_width = WIDTH_MIMETYPES)
@@ -76,7 +75,7 @@ def listfound(words, is_fuzzy):
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
+    ColoredSetting(args.colored)
     mimetypes.init()
     if args.list:
         listall()

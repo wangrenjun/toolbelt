@@ -2,24 +2,9 @@
 # -*- coding: utf-8 -*-
 
 __all__ = [
-    'init_colored',
-    'Colored',
-    'AnsiColored',
-    'colorize',
-    'ttyautocolorize',
-    'combine',
-    'EscapeSet',
-    'EscapeReset',
-    'EscapeFgColor',
-    'EscapeBgColor',
-    'ColoredArgParser',
-    'ColoredFormatter',
-    'ColoredLogger',
-    'init_colored_logger',
-    'FileRead',
     'reversed_dict',
+    'Singleton',
     'ConstDotDictify',
-    'floatify',
     'align_size',
     'roundup',
     'get_terminal_size',
@@ -41,6 +26,23 @@ __all__ = [
     'substr_match',
     'has_fuzzy_matched',
     'has_substr_matched',
+    'namedtupledictify',
+    'colorizeansi',
+    'ttyautocolorizeansi',
+    'combineansi',
+    'colorize',
+    'ttyautocolorize',
+    'combine',
+    'escapeset',
+    'escapereset',
+    'escapefgcolor',
+    'escapebgcolor',
+    'ColoredSetting',
+    'ColoredArgParser',
+    'ColoredFormatter',
+    'ColoredLogger',
+    'init_colored_logger',
+    'FileRead',
     'chardet',
     'trydecodingbytes',
     'PrettyTable',
@@ -55,18 +57,137 @@ __all__ = [
     'humanizedhex',
     'humanizeddec',
     'humanizedbinip',
+    'humanizedbytes',
+    'humanizedpercentage',
+    'humanizedpercentage2',
 ]
 
 import sys, os, enum, math, os, itertools, abc, json, signal, logging, argparse, collections, urllib, textwrap, difflib, ipaddress
 
-_has_enabled_coloring = True
+# Swap keys for values
+reversed_dict = lambda d: dict(zip(d.values(), d.keys()))
 
-def init_colored(on = True):
-    global _has_enabled_coloring
-    if not isinstance(on, bool):
-        raise TypeError('must be bool' + ', not ' + type(on).__name__)
-    on, _has_enabled_coloring = _has_enabled_coloring, on
-    return on
+class Singleton(type):
+    __instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls.__instances:
+            cls.__instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls.__instances[cls]
+
+class ConstDotDictify():
+    def __init__(self, *args, **kwargs):
+        self.__dict__.update(*args, **kwargs)
+    def __getitem__(self, key):
+        return self.__dict__[key]
+    __getattr__ = __getitem__
+    def __readonly__(self, *args, **kwargs):
+        raise AttributeError("Cannot reassign members.")
+    __setattr__ = __readonly__
+    __setitem__ = __readonly__
+    del __readonly__
+
+# Only to be used to align on a power of 2 boundary.
+align_size = lambda size, boundary: size + (boundary - 1) & ~(boundary - 1) if math.log(boundary, 2).is_integer() else None
+
+roundup = lambda n, b: int(math.ceil(n / b)) * b
+
+def get_terminal_size(file = sys.stdout):
+    try:
+        _ = os.get_terminal_size(file.fileno())
+        columns, lines = _.columns, _.lines
+    except OSError:
+        columns, lines = 0, 0
+    return columns, lines
+
+# Convert None, 0, False, or any falsy value to empty string.
+xstr = lambda s: str(s or '')
+
+def make_list_of_dict_from_arrays(keys, *values):
+    l = []
+    if keys:
+        for i in [[[k, v] for k, v in zip(keys, vals)] for vals in values ]:
+            l.append(dict(i))
+    return l
+
+has_all_keys = lambda dict, keys: all(_ in dict for _ in keys)
+has_any_keys = lambda dict, keys: any(_ in dict for _ in keys)
+
+joiniterable = lambda sep, seq: sep.join(map(str, seq))
+
+transposelist = lambda l: list(map(list, zip(*l)))
+
+class RingLooper():
+    def __init__(self, *array):
+        self.__array = array
+    def __iter__(self):
+        self.__cycler = itertools.cycle(range(len(self.__array)))
+        return self
+    def __next__(self):
+        if self.__array:
+            return self.__array[next(self.__cycler)]
+        else:
+            raise StopIteration
+
+urlscheme = lambda url: urllib.parse.urlparse(url).scheme
+
+cut_integer = lambda num, bits: num & ((1<< bits) - 1)
+
+def count_set_bits(n):
+    count = 0
+    while (n):
+        n = n & (n - 1)
+        count += 1
+    return count
+
+isv2 = lambda : True if sys.version_info[0] == 2 else False
+isv3 = lambda : True if sys.version_info[0] == 3 else False
+
+"""
+>>> inversed_textwrap('1234567890', 3)
+['1', '234', '567', '890']
+"""
+inversed_textwrap = lambda text, wrapwidth: list(map(lambda x:x[::-1], textwrap.wrap(text[::-1], wrapwidth)[::-1]))
+
+# Check filestream is attached to terminal.
+streamistty = lambda file: True if file.isatty() else False
+
+_DEFAULT_THRESHOLD = 0.7
+
+def fuzzy_match(needle, haystack, ignore_case = False, threshold = _DEFAULT_THRESHOLD):
+    if ignore_case:
+        matching = lambda entry: difflib.SequenceMatcher(a = needle.lower(), b = entry.lower()).ratio() >= threshold
+    else:
+        matching = lambda entry: difflib.SequenceMatcher(a = needle, b = entry).ratio() >= threshold
+    return filter(match, haystack)
+
+def substr_match(needle, haystack, ignore_case = False):
+    if ignore_case:
+        matching = lambda entry: needle.lower() in entry.lower()
+    else:
+        matching = lambda entry: needle in entry
+    return filter(match, haystack)
+
+def has_fuzzy_matched(needle, haystack, ignore_case = False, threshold = _DEFAULT_THRESHOLD):
+    if ignore_case:
+        matching = lambda entry: difflib.SequenceMatcher(a = needle.lower(), b = entry.lower()).ratio() >= threshold
+    else:
+        matching = lambda entry: difflib.SequenceMatcher(a = needle, b = entry).ratio() >= threshold
+    for entry in haystack:
+        if matching(entry):
+            return True
+    return False
+
+def has_substr_matched(needle, haystack, ignore_case = False):
+    if ignore_case:
+        matching = lambda entry: needle.lower() in entry.lower()
+    else:
+        matching = lambda entry: needle in entry
+    for entry in haystack:
+        if matching(entry):
+            return True
+    return False
+
+namedtupledictify = lambda nt: dict(nt._asdict())
 
 _sets = dict(zip(
         ( 'bold', 'dim', 'italic', 'underlined', 'blink', 'rapid blink', 'reverse', 'hidden', 'crossed out', ),
@@ -96,56 +217,18 @@ def _esc(codes):
     else:
         raise TypeError('must be one of int, str, iterable' + ', not ' + type(codes).__name__)
 
-class Colored(metaclass = abc.ABCMeta):
-    @abc.abstractmethod
-    def __add__(self, other):
-        pass
-    @abc.abstractmethod
-    def __radd__(self, other):
-        pass
-    @abc.abstractmethod
-    def __str__(self):
-        pass
-    @abc.abstractmethod
-    def __repr__(self):
-        pass
+def colorizeansi(*args, enabling = True, **style):
+    argstring = joiniterable(' ', args)
+    if enabling:
+        paint = combineansi(**style)
+        if paint:
+            argstring = paint + argstring + escapereset.NORMAL.value
+    return argstring
 
-class AnsiColored(Colored):
-    def __init__(self, *args, enabling = True, **style):
-        string = ' '.join(args)
-        if _has_enabled_coloring is True and enabling is True:
-            paint = combine(**style)
-            if paint:
-                string = paint + string + EscapeReset.NORMAL.value
-        self.__string = string
+def ttyautocolorizeansi(stream, *args, **style):
+    return colorizeansi(*args, enabling = streamistty(stream), **style)
 
-    def __add__(self, other):
-        if isinstance(other, (self.__class__, str)):
-            return self.__class__(self.__string + str(other))
-        else:
-            return NotImplemented
-
-    def __radd__(self, other):
-        if isinstance(other, (self.__class__, str)):
-            return self.__class__(str(other) + self.__string)
-        else:
-            return NotImplemented
-
-    def __str__(self):
-        return self.__string
-
-    def __repr__(self):
-        return "%s.%s(%r)" % (self.__class__.__module__,
-                              self.__class__.__qualname__,
-                              self.__dict__)
-
-def colorize(*args, enabling = None, **style):
-    return AnsiColored(*args, enabling = enabling, **style)
-
-def ttyautocolorize(stream, *args, **style):
-    return AnsiColored(*args, enabling = streamistty(stream), **style)
-
-def combine(**style):
+def combineansi(**style):
     fields = {
         'set' :     lambda x: [ _sets[_] for _ in x ],
         'reset' :   lambda x: [ _resets[_] for _ in x ],
@@ -159,10 +242,30 @@ def combine(**style):
             l.extend(f(v))
     return _esc(l) if l else ''
 
-EscapeSet = enum.Enum('EscapeSet', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _sets.items() })
-EscapeReset = enum.Enum('EscapeReset', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _resets.items() })
-EscapeFgColor = enum.Enum('EscapeFgColor', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _fgcolors.items() })
-EscapeBgColor = enum.Enum('EscapeBgColor', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _bgcolors.items() })
+def colorize(*args, enabling = True, **style):
+    return colorizeansi(*args, enabling = enabling, **style)
+
+def ttyautocolorize(stream, *args, **style):
+    return ttyautocolorizeansi(stream, *args, **style)
+
+def combine(**style):
+    return combineansi(**style)
+
+escapeset = enum.Enum('escapeset', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _sets.items() })
+escapereset = enum.Enum('escapereset', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _resets.items() })
+escapefgcolor = enum.Enum('escapefgcolor', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _fgcolors.items() })
+escapebgcolor = enum.Enum('escapebgcolor', { '_'.join(k.upper().split(' ')): _esc(v) for k, v in _bgcolors.items() })
+
+class ColoredSetting(metaclass = Singleton):
+    def __init__(self, when = 'auto', autocb = streamistty):
+        if when == 'always':
+            self.__has_enabled_colorize = True
+        elif when == 'never':
+            self.__has_enabled_colorize = False
+        else:
+            self.__has_enabled_colorize = autocb
+    def is_colorize(self, stream):
+        return self.__has_enabled_colorize if isinstance(self.__has_enabled_colorize, bool) else self.__has_enabled_colorize(stream)
 
 class ColoredArgParser(argparse.ArgumentParser):
     __styles = { 'usage' : { 'fgcolor' : 'yellow', 'set' : ( 'bold', ) },
@@ -178,16 +281,16 @@ class ColoredArgParser(argparse.ArgumentParser):
     def print_usage(self, file = sys.stdout):
         usage = self.format_usage()
         usage = usage[0].upper() + usage[1:]
-        self._print_message(str(colorize(usage, enabling = streamistty(file), **self.__styles['usage'])), file)
+        self._print_message(colorize(usage, enabling = ColoredSetting().is_colorize(file), **self.__styles['usage']), file)
 
     def print_help(self, file = sys.stdout):
         help = self.format_help()
         help = help[0].upper() + help[1:]
-        self._print_message(str(colorize(help, enabling = streamistty(file), **self.__styles['help'])), file)
+        self._print_message(colorize(help, enabling = ColoredSetting().is_colorize(file), **self.__styles['help']), file)
 
     def exit(self, status = 0, message = None):
         if message:
-            self._print_message(str(colorize(message, enabling = streamistty(sys.stderr), **self.__styles['error'])), sys.stderr)
+            self._print_message(colorize(message, enabling = ColoredSetting().is_colorize(sys.stderr), **self.__styles['error']), sys.stderr)
         sys.exit(status)
 
     def error(self, message):
@@ -197,7 +300,7 @@ class ColoredArgParser(argparse.ArgumentParser):
 
     def print_error(self, message):
         message = '%(prog)s: ERROR: %(message)s\n' % { 'prog': self.prog, 'message': message }
-        self._print_message(str(colorize(message, enabling = streamistty(sys.stderr), **self.__styles['error'])), sys.stderr)
+        self._print_message(colorize(message, enabling = ColoredSetting().is_colorize(sys.stderr), **self.__styles['error']), sys.stderr)
 
 _levelstyles = { 'INFO' :     { 'fgcolor' : 'green', 'set' : ( 'bold', ) },
                  'WARNING':   { 'fgcolor' : 'yellow', 'set' : ( 'bold', ) },
@@ -218,7 +321,7 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record):
         msg = super().format(record)
-        return str(colorize(msg, enabling = streamistty(self.__stream), **_levelstyles.get(record.levelname, {})))
+        return str(colorize(msg, enabling = ColoredSetting().is_colorize(self.__stream), **_levelstyles.get(record.levelname, {})))
 
 class ColoredLogger(logging.Logger):
     def __init__(self, name, level = logging.NOTSET, stream = sys.stderr):
@@ -290,128 +393,6 @@ class FileRead:
     def hook_open(cls, encoding = None, errors = None, newline = None):
         return lambda f, m: open(f, mode = m, encoding = encoding, errors = errors, newline = newline)
 
-# Swap keys for values
-reversed_dict = lambda d: dict(zip(d.values(), d.keys()))
-
-class ConstDotDictify():
-    def __init__(self, *args, **kwargs):
-        self.__dict__.update(*args, **kwargs)
-    def __getitem__(self, key):
-        return self.__dict__[key]
-    __getattr__ = __getitem__
-    def __readonly__(self, *args, **kwargs):
-        raise AttributeError("Cannot reassign members.")
-    __setattr__ = __readonly__
-    __setitem__ = __readonly__
-    del __readonly__
-
-def floatify(s):
-    try:
-        return float(s)
-    except ValueError:
-        return s
-
-# Only to be used to align on a power of 2 boundary.
-align_size = lambda size, boundary: size + (boundary - 1) & ~(boundary - 1) if math.log(boundary, 2).is_integer() else None
-
-roundup = lambda n, b: int(math.ceil(n / b)) * b
-
-def get_terminal_size(file = sys.stdout):
-    try:
-        _ = os.get_terminal_size(file.fileno())
-        columns, lines = _.columns, _.lines
-    except OSError:
-        columns, lines = 0, 0
-    return columns, lines
-
-# Convert None, 0, False, or any falsy value to empty string.
-xstr = lambda s: str(s or '')
-
-def make_list_of_dict_from_arrays(keys, *values):
-    l = []
-    if keys:
-        for i in [[[k, v] for k, v in zip(keys, vals)] for vals in values ]:
-            l.append(dict(i))
-    return l
-
-has_all_keys = lambda dict, keys: all(_ in dict for _ in keys)
-has_any_keys = lambda dict, keys: any(_ in dict for _ in keys)
-
-joiniterable = lambda sep, seq: sep.join(map(str, seq))
-
-transposelist = lambda l: list(map(list, zip(*l)))
-
-class RingLooper():
-    def __init__(self, *array):
-        self.__array = array
-    def __iter__(self):
-        self.__cycler = itertools.cycle(range(len(self.__array)))
-        return self
-    def __next__(self):
-        if self.__array:
-            return self.__array[next(self.__cycler)]
-        else:
-            raise StopIteration
-
-urlscheme = lambda url: urllib.parse.urlparse(url).scheme
-
-cut_integer = lambda num, bits: num & ((1<< bits) - 1)
-
-def count_set_bits(n):
-    count = 0
-    while (n):
-        n = n & (n - 1)
-        count += 1
-    return count
-
-isv2 = lambda : True if sys.version_info[0] == 2 else False
-isv3 = lambda : True if sys.version_info[0] == 3 else False
-
-"""
->>> inversed_textwrap('1234567890', 3)
-['1', '234', '567', '890']
-"""
-inversed_textwrap = lambda text, wrapwidth: list(map(lambda x:x[::-1], textwrap.wrap(text[::-1], wrapwidth)[::-1]))
-
-# Check filestream is attached to terminal.
-streamistty = lambda file: True if file.isatty() else False
-
-DEFAULT_THRESHOLD = 0.6
-
-def fuzzy_match(needle, haystack, ignore_case = False, threshold = DEFAULT_THRESHOLD):
-    if ignore_case:
-        matching = lambda entry: difflib.SequenceMatcher(a = needle.lower(), b = entry.lower()).ratio() >= threshold
-    else:
-        matching = lambda entry: difflib.SequenceMatcher(a = needle, b = entry).ratio() >= threshold
-    return filter(match, haystack)
-
-def substr_match(needle, haystack, ignore_case = False):
-    if ignore_case:
-        matching = lambda entry: needle.lower() in entry.lower()
-    else:
-        matching = lambda entry: needle in entry
-    return filter(match, haystack)
-
-def has_fuzzy_matched(needle, haystack, ignore_case = False, threshold = DEFAULT_THRESHOLD):
-    if ignore_case:
-        matching = lambda entry: difflib.SequenceMatcher(a = needle.lower(), b = entry.lower()).ratio() >= threshold
-    else:
-        matching = lambda entry: difflib.SequenceMatcher(a = needle, b = entry).ratio() >= threshold
-    for entry in haystack:
-        if matching(entry):
-            return True
-    return False
-
-def has_substr_matched(needle, haystack, ignore_case = False):
-    if ignore_case:
-        matching = lambda entry: needle.lower() in entry.lower()
-    else:
-        matching = lambda entry: needle in entry
-    for entry in haystack:
-        if matching(entry):
-            return True
-    return False
-
 def chardet(bs):
     try:
         import chardet
@@ -436,16 +417,14 @@ def trydecodingbytes(bs):
         encoding = chardet(bs)['encoding']
     except ImportError:
         encoding = None
-    if not encoding:
-        if tried_encodings and tried_encodings[0] and tried_encodings[0][0]:
-            encoding = tried_encodings[0][0]
-        else:
-            encoding = 'utf-8'  # Guess
-    try:
-        s = bs.decode(encoding = encoding)
-    except UnicodeDecodeError:
-        s = str(bs)
-        encoding = None
+    if not encoding and tried_encodings and tried_encodings[0] and tried_encodings[0][0]:
+        encoding = tried_encodings[0][0]
+    if encoding:
+        try:
+            s = bs.decode(encoding = encoding)
+        except Exception:
+            s = str(bs)
+            encoding = None
     return s, encoding
 
 _default_field_paint = {'set' : ( 'bold', )}
@@ -498,11 +477,11 @@ class PrettyTable():
         aligned_width_of_columns = map(lambda x: align_size(x, self.__align_boundary), self.__max_size_of_columns)
         aligned_width_of_columns = [ i if j == None else j for i, j in zip(aligned_width_of_columns, self.__fixed_width_of_fields) ]
         fmtstr = self.__padding_characters.join(['{:%s%d}' % (_, __) for _, __ in zip(self.__field_alignments, aligned_width_of_columns)])
-        string = str(AnsiColored(fmtstr.format(*self.__fields), enabling = self.__enable_painting, **self.__field_paint))
+        string = colorize(fmtstr.format(*self.__fields), enabling = self.__enable_painting, **self.__field_paint)
         string += os.linesep
         paletteiter = iter(RingLooper(*self.__palette_paints))
         for r in self.__records:
-            string += str(AnsiColored(fmtstr.format(*r), enabling = self.__enable_painting, **next(paletteiter)))
+            string += colorize(fmtstr.format(*r), enabling = self.__enable_painting, **next(paletteiter))
             string += os.linesep
         return string
 
@@ -571,7 +550,7 @@ class PrettyVTable():
             group = transposelist(group)
             paint = next(paletteiter)
             for row in group:
-                string += str(AnsiColored(fmtstr.format(*row), enabling = self.__enable_painting, **paint))
+                string += colorize(fmtstr.format(*row), enabling = self.__enable_painting, **paint)
                 string += os.linesep
         return string
 
@@ -598,7 +577,7 @@ def signo_to_signame(sno):
     return _siglist.get(sno)
 
 def _on_trapped(signo, frame):
-    print(str(colorize('Interrupted by %s' % (signo_to_signame(signo)), enabling = streamistty(sys.stderr), fgcolor = 'green', set = ( 'bold', ))), file = sys.stderr)
+    print(str(colorize('Interrupted by %s' % (signo_to_signame(signo)), enabling = ColoredSetting().is_colorize(sys.stderr), fgcolor = 'green', set = ( 'bold', ))), file = sys.stderr)
     sys.exit(exitcode.EC_FATAL_SIGNAL_BASE + signo)
 
 def set_trap_handler(sigs, handler = None):
@@ -656,3 +635,58 @@ def humanizedbinip(ipaddr):
         fillwidth = 128
         wrapwidth = 16
     return '.'.join(textwrap.wrap('{:b}'.format(int(ipaddr)).zfill(fillwidth), wrapwidth))
+
+__capacity_symbols = {
+    'traditionalbytes' : (
+    ('YB',  'yottabyte',    10 ** 24    ),
+    ('ZB',  'zetabyte',     10 ** 21    ),
+    ('EB',  'exabyte',      10 ** 18    ),
+    ('PB',  'petabyte',     10 ** 15    ),
+    ('TB',  'terabyte',     10 ** 12    ),
+    ('GB',  'gigabyte',     10 ** 9     ),
+    ('MB',  'megabyte',     10 ** 6     ),
+    ('kB',  'kilobyte',     10 ** 3     ),),
+    'iecbytes' : (
+    ('YiB', 'yobibyte',     1 << 80     ),
+    ('ZiB', 'zebibyte',     1 << 70     ),
+    ('EiB', 'exbibyte',     1 << 60     ),
+    ('PiB', 'pebibyte',     1 << 50     ),
+    ('TiB', 'tebibyte',     1 << 40     ),
+    ('GiB', 'gibibyte',     1 << 30     ),
+    ('MiB', 'mebibyte',     1 << 20     ),
+    ('KiB', 'kibibyte',     1 << 10     ),),
+}
+
+def humanizedbytes(size, to = 'traditionalbytes', precision = 1):
+    if isinstance(size, (int, float)):
+        if size < 0:
+            raise ValueError('size < 0')
+        bytes = size
+    elif isinstance(size, str):
+        for name, symbols in __capacity_symbols.items():
+            for item in symbols:
+                for i in item[:2]:
+                    if size.lower().endswith(i.lower()):
+                        bytes = float(size[:-len(i)]) * item[2]
+                        break
+                else:
+                    continue
+                break
+            else:
+                continue
+            break
+        else:
+            raise ValueError("can't parse " + size)
+    else:
+        TypeError('must be int, float or str' + ', not ' + type(size).__name__)
+    num = bytes
+    symbol = 'B'
+    for item in __capacity_symbols[to]:
+        if bytes >= item[2]:
+            num = float(bytes) / item[2]
+            symbol = item[0]
+            break
+    return '{:.{precision}f} {}'.format(num, symbol, precision = precision)
+
+humanizedpercentage = lambda n: '{:.{precision}f}%'.format(n, precision = 1)
+humanizedpercentage2 = lambda n: '{:.{precision}%}'.format(n, precision = 1)

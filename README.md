@@ -67,8 +67,11 @@ urlparser
 --------
 urlencode编解码、URL格式解析和重组、Querystring解析和重组；
 
+psinfo
+--------
+查看 /proc
 
 实现
 --------
-* **Python3**：base64enc、chardet、charsets、dateparser、errorcodes、htmlenc、httpstatus、ipcalculator、mimetypes、services、tattoos、textmatch、timezones、urlparser
+* **Python3**：base64enc、chardet、charsets、dateparser、errorcodes、htmlenc、httpstatus、ipcalculator、mimetypes、services、tattoos、textmatch、timezones、urlparser、psinfo
 * **Bash**：ffenc_converter、service_monitor、platforminfo

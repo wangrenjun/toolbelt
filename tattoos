@@ -9,15 +9,20 @@ from extras import humanizedoct
 from extras import humanizedhex
 from extras import humanizeddec
 from extras import humanizedtwoscompbin
-from extras import init_colored
+from extras import ColoredSetting
+from extras import colorize
+from extras import RingLooper
 
 def parse_args():
     parser = ColoredArgParser(description = 'Tattooing the magic numbers.')
-    parser.add_argument('-n', '--nocolor',
+    parser.add_argument('--color',
+        choices = ['auto', 'always', 'never'],
+        default = 'auto',
+        dest = 'colored',
+        help = 'When to colored, the default is auto.')
+    parser.add_argument('-z', '--zen-of-python',
         action = 'store_true',
-        default = False,
-        dest = 'is_nocolor',
-        help = 'No color.')
+        help = 'The Zen of Python Colorful version.')
     return parser.parse_args()
 
 integer_limits = (
@@ -36,7 +41,7 @@ integer_limits = (
 )
 
 def list_limits_for_integer():
-    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt = PrettyTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_field('Constant', alignment = '>')
     pt.add_field('Decimal', alignment = '>')
     pt.add_field('Binary', alignment = '>')
@@ -47,7 +52,7 @@ def list_limits_for_integer():
     print(pt)
 
 def list_pow2n(base = 2, maxexponent = 64):
-    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt = PrettyTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_field('Power of 2', alignment = '>')
     pt.add_field('Decimal', alignment = '>')
     pt.add_field('Binary', alignment = '>')
@@ -59,7 +64,7 @@ def list_pow2n(base = 2, maxexponent = 64):
     print(pt)
 
 def list_twos_complement(ranger = range(15, -16, -1), bits = 4):
-    pt = PrettyTable(enable_painting = True if sys.stdout.isatty() else False)
+    pt = PrettyTable(enable_painting = ColoredSetting().is_colorize(sys.stdout))
     pt.add_field('Decimal', alignment = '>')
     pt.add_field("Two's complement", alignment = '>')
     pt.add_field('Octal', alignment = '>')
@@ -68,13 +73,41 @@ def list_twos_complement(ranger = range(15, -16, -1), bits = 4):
         pt.add_record(i, humanizedtwoscompbin(i, bits = bits), humanizedoct(i), humanizedhex(i))
     print(pt)
 
+_palette_paints = ( { 'fgcolor' : 'red', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'green', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'yellow', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'blue', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'magenta', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'cyan', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light red', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light green', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light yellow', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light blue', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light magenta', 'set' : ( 'bold', ) },
+                    { 'fgcolor' : 'light cyan', 'set' : ( 'bold', ) }, )
+
+def zop():
+    stdoutbak, sys.stdout = sys.stdout, None
+    from this import s
+    sys.stdout = stdoutbak
+    paletteiter = iter(RingLooper(*_palette_paints))
+    d = {}
+    for c in (65, 97):
+        for i in range(26):
+            d[chr(i+c)] = chr((i+13) % 26 + c)
+    for l in ''.join([d.get(c, c) for c in s]).splitlines():
+        print(colorize(l, enabling = ColoredSetting().is_colorize(sys.stdout), **next(paletteiter)))
+
 def main(args = None):
     if args is None:
         return 0
-    init_colored(not args.is_nocolor)
-    list_limits_for_integer()
-    list_pow2n()
-    list_twos_complement()
+    ColoredSetting(args.colored)
+    if args.zen_of_python:
+        zop()
+    else:
+        list_limits_for_integer()
+        list_pow2n()
+        list_twos_complement()
 
 if __name__ == '__main__':
     sys.exit(main(parse_args()))
