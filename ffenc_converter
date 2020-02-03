@@ -2,15 +2,38 @@
 
 readonly SCRIPT_NAME="$(basename ${0})"
 readonly TAIL=".converted"
+readonly TAB_NUM=4
 
 usage()
 {
     cat << EOF >&2
-USAGE: $SCRIPT_NAME [--name <pattern>] [--iname <pattern>] [-f <from encoding> | --from <from encoding>] [-t <to encoding> | --to <to encoding>]
-            [-d | --dos2unix] [-m | --mac2unix] [-o | --override] [-h | --help]
-            FILE
+USAGE: $SCRIPT_NAME [-h | --help]
+                        [--name <pattern>] [--iname <pattern>]
+                        [-f <from encoding> | --from <from encoding>]
+                        [-t <to encoding> | --to <to encoding>]
+                        [-d | --dos2unix] [-m | --mac2unix]
+                        [-o | --override]
+                        [-e | --expand]
+                        FILE
 
 OPTIONS
+        --name <pattern>
+
+        --iname <pattern>
+            Like --name, but the match is case insensitive.
+
+        -f <from encoding>, --from <from encoding>
+
+        -t <to encoding>, --to <to encoding>
+
+        -d, --dos2unix
+
+        -m, --mac2unix
+
+        -o, --override
+
+        -e, --expand
+            Convert tabs to spaces.
 
 EOF
     exit
@@ -93,6 +116,7 @@ convert_file()
         command="iconv -f $from -t $to $infile"
         if [ -z "$override" ]; then
             command="$command | sponge ${1}${TAIL}"
+            infile="${1}${TAIL}"
         else
             command="$command | sponge ${infile}"
         fi
@@ -100,6 +124,20 @@ convert_file()
         if [ "$rv" != 0 ] || [ "${#rs}" != 0 ]; then
             log_error "${1}" "$rs"
             #log_error "${1}" 'File encoding conversion failed'
+            return 1
+        fi
+    fi
+    if [ -n "$toexpand" ]; then
+        command="expand -t $TAB_NUM $infile"
+        if [ -z "$override" ]; then
+            command="$command | sponge ${1}${TAIL}"
+        else
+            command="$command | sponge ${infile}"
+        fi
+        rs=$(eval "$command" 2>&1); rv="${?}"
+        if [ "$rv" != 0 ] || [ "${#rs}" != 0 ]; then
+            log_error "${1}" "$rs"
+            #log_error "${1}" 'Tabs conversion failed'
             return 1
         fi
     fi
@@ -117,11 +155,11 @@ convert_dir()
 main()
 {
     if ! has_command dos2unix || ! has_command mac2unix; then
-        logerr 'Running this script require the dos2unix<http://waterlan.home.xs4all.nl/dos2unix.html> to be installed'
+        log_error 'Running this script require the dos2unix<http://waterlan.home.xs4all.nl/dos2unix.html> to be installed'
         exit "$EC_ILLEGAL_CMD"
     fi
     if ! has_command sponge; then
-        logerr 'Running this script require the moreutils<https://joeyh.name/code/moreutils/> to be installed'
+        log_error 'Running this script require the moreutils<https://joeyh.name/code/moreutils/> to be installed'
         exit "$EC_ILLEGAL_CMD"
     fi
 
@@ -129,7 +167,7 @@ main()
     set_trap_handler on_trapped SIGHUP SIGINT SIGQUIT SIGTERM
 
     [ "${#}" = 0 ] && usage
-    opts=$(getopt -o f:t:dmoh --long name:,iname:,from:,to:,dos2unix,mac2unix,override,help -n "$SCRIPT_NAME" -- "$@")
+    opts=$(getopt -o f:t:dmoeh --long name:,iname:,from:,to:,dos2unix,mac2unix,override,expand,help -n "$SCRIPT_NAME" -- "$@")
     if [ "${?}" != 0 ]; then
         log_error 'Failed to parsing options'
         usage
@@ -145,6 +183,7 @@ main()
             -d | --dos2unix )   fmt_cmd='dos2unix'; shift ;;
             -m | --mac2unix )   fmt_cmd='mac2unix'; shift ;;
             -o | --override )   override='-o'; shift ;;
+            -e | --expand )     toexpand=1; shift ;;
             -h | --help)        usage ;;
             -- )                shift; break ;;
             * )                 log_error 'Internal error'; usage ;;
