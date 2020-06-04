@@ -264,17 +264,19 @@ main()
     for dir ; do
         files=$(find "${dir}" -name .git -prune -o -name .svn -prune -o -type f -exec file {} \; | grep text | grep 'with CRLF line terminators' | cut -d: -f1 2> /dev/null)
         for f in $files; do
+            log_info "$(readlink -f ${f} 2> /dev/null)" "CRLF to LF"
             dos2unix -q -k -o "${f}"
         done
         files=$(find "${dir}" -name .git -prune -o -name .svn -prune -o -type f -exec file {} \; | grep text | grep 'with CR line terminators' | cut -d: -f1 2> /dev/null)
         for f in $files; do
+            log_info "$(readlink -f ${f} 2> /dev/null)" "CR to LF"
             mac2unix -q -k -o "${f}"
         done
         files=$(find "${dir}" -name .git -prune -o -name .svn -prune -o -type f -exec file {} \; | grep text | cut -d: -f1 2> /dev/null)
         for f in $files; do
-            echo "${f}"
             if enc=$(peval "uchardet '${f}'"); then
                 if [[ $(to_upper "$enc") != 'UTF-8' ]]; then
+                    log_info "$(readlink -f ${f} 2> /dev/null)" "${enc} to UTF-8"
                     peval "iconv -c -f ${enc} -t UTF-8 '${f}'" | sponge "${f}"
                 fi
             fi
