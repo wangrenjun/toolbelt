@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+# Initial go project layout
+
+readonly SCRIPT_NAME="$(basename $0)"
+
+[ "${#}" == 0 ] && echo "USAGE: ${SCRIPT_NAME} DIR" >&2
+
+for dir ; do
+    basedir="$(readlink -f ${dir} 2> /dev/null)"
+    mkdir -p "${basedir}"/{cmd,internal,pkg,docs,init,configs,api,scripts}
+    wget -q --waitretry=1 --tries=9 --retry-connrefused -O "${basedir}/.gitignore" 'https://raw.githubusercontent.com/github/gitignore/master/Go.gitignore'
+    if [ "${?}" != 0 ]; then
+        rm -f "${basedir}/.gitignore"
+        echo -e "\033[1;31mFailed to download Go.gitignore\033[0m"
+    fi
+    cat << EOF > "${basedir}/.mailmap"
+rj <wangrj1981@gmail.com>
+EOF
+    tree -ahsgupD --inodes -CF "${basedir}"
+done
