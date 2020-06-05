@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+readonly SCRIPT_NAME="$(basename $0)"
+
+if [ -n "$GO111MODULE" ] || [ -n "$(go env GO111MODULE 2> /dev/null)" ]; then
+    echo -e "\033[1;31m${SCRIPT_NAME}: GO111MODULE enabled\033[0m" >&2
+    exit
+fi
+
+gopath="$GOPATH"
+if [ -z "$gopath" ]; then
+    gopath=$(go env GOPATH 2> /dev/null)
+fi
+if [ -z "$gopath" ]; then
+    echo -e "\033[1;31m${SCRIPT_NAME}: GOPATH not set\033[0m" >&2
+    exit
+fi
+
+mkdir -p "${gopath}"/src/golang.org/x
+mkdir -p "${gopath}"/src/google.golang.org
+mkdir -p "${gopath}"/src/go.uber.org
+mkdir -p "${gopath}"/src/cloud.google.com
+
+pevalq()
+{
+    local rs rv
+    rs=$(eval "${1}" 2>&1 1> /dev/null); rv="${?}"
+    if [ "$rv" != 0 ]; then
+        echo -e "\033[1;31m${SCRIPT_NAME}: "${1}:" "[$rv]:" "$rs"\033[0m" >&2
+        return "$rv"
+    fi
+}
+
+pevalq "git clone https://github.com/golang/sys.git ${gopath}/src/golang.org/x/sys"
+pevalq "git clone https://github.com/golang/crypto.git ${gopath}/src/golang.org/x/crypto"
+pevalq "git clone https://github.com/golang/text.git ${gopath}/src/golang.org/x/text"
+pevalq "git clone https://github.com/golang/tools.git ${gopath}/src/golang.org/x/tools"
+pevalq "git clone https://github.com/golang/lint.git ${gopath}/src/golang.org/x/lint"
+pevalq "git clone https://github.com/golang/blog.git ${gopath}/src/golang.org/x/blog"
+pevalq "git clone https://github.com/golang/exp.git ${gopath}/src/golang.org/x/exp"
+pevalq "git clone https://github.com/golang/image.git ${gopath}/src/golang.org/x/image"
+pevalq "git clone https://github.com/golang/mobile.git ${gopath}/src/golang.org/x/mobile"
+pevalq "git clone https://github.com/golang/net.git ${gopath}/src/golang.org/x/net"
+pevalq "git clone https://github.com/golang/review.git ${gopath}/src/golang.org/x/review"
+pevalq "git clone https://github.com/golang/sync.git ${gopath}/src/golang.org/x/sync"
+pevalq "git clone https://github.com/golang/talks.git ${gopath}/src/golang.org/x/talks"
+pevalq "git clone https://github.com/golang/time.git ${gopath}/src/golang.org/x/time"
+pevalq "git clone https://github.com/golang/oauth2.git ${gopath}/src/golang.org/x/oauth2"
+pevalq "git clone https://github.com/golang/mod.git ${gopath}/src/golang.org/x/mod"
+pevalq "git clone https://github.com/golang/xerrors.git ${gopath}/src/golang.org/x/xerrors"
+pevalq "git clone https://github.com/protocolbuffers/protobuf-go.git ${gopath}/src/google.golang.org/protobuf"
+pevalq "git clone https://github.com/grpc/grpc-go.git ${gopath}/src/google.golang.org/grpc"
+pevalq "git clone https://github.com/googleapis/google-api-go-client.git ${gopath}/src/google.golang.org/api"
+pevalq "git clone https://github.com/googleapis/go-genproto.git ${gopath}/src/google.golang.org/genproto"
+pevalq "git clone https://github.com/golang/appengine.git ${gopath}/src/google.golang.org/appengine"
+pevalq "git clone https://github.com/uber-go/zap.git ${gopath}/src/go.uber.org/zap"
+pevalq "git clone https://github.com/uber-go/atomic.git ${gopath}/src/go.uber.org/atomic"
+pevalq "git clone https://github.com/googleapis/google-cloud-go.git ${gopath}/src/cloud.google.com/go"
+echo -e "\033[1;32mdone\033[0m"

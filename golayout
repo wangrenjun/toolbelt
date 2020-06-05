@@ -12,7 +12,7 @@ for dir ; do
     wget -q --waitretry=1 --tries=9 --retry-connrefused -O "${basedir}/.gitignore" 'https://raw.githubusercontent.com/github/gitignore/master/Go.gitignore'
     if [ "${?}" != 0 ]; then
         rm -f "${basedir}/.gitignore"
-        echo -e "\033[1;31m${SCRIPT_NAME}: ${basedir}: Failed to download Go.gitignore\033[0m"
+        echo -e "\033[1;31m${SCRIPT_NAME}: ${basedir}: Failed to download Go.gitignore\033[0m" >&2
     fi
     cat << EOF > "${basedir}/.mailmap"
 rj <wangrj1981@gmail.com>
