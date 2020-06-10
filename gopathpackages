@@ -2,11 +2,6 @@
 
 readonly SCRIPT_NAME="$(basename $0)"
 
-if [ -n "$GO111MODULE" ] || [ -n "$(go env GO111MODULE 2> /dev/null)" ]; then
-    echo -e "\033[1;31m${SCRIPT_NAME}: GO111MODULE enabled\033[0m" >&2
-    exit
-fi
-
 gopath="$GOPATH"
 if [ -z "$gopath" ]; then
     gopath=$(go env GOPATH 2> /dev/null)
